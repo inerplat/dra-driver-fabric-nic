@@ -31,7 +31,7 @@ func newPlugin(t *testing.T) *Plugin {
 	devices := inventory.Build([]sysfs.Function{
 		{BDF: "0000:9c:00.0", Class: 0x020700, NUMANode: 1, IOMMUGroup: "60", Cdev: "vfio3"},
 		{BDF: "0000:bc:00.0", Class: 0x020700, NUMANode: 1, IOMMUGroup: "70"},
-	}, nil, deviceattribute.WithFSFromRoot(t.TempDir()))
+	}, inventory.Merged{}, deviceattribute.WithFSFromRoot(t.TempDir()))
 	if err := p.CDI.Write(devices); err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ func TestPrepareGuestRDMASkipsEthernet(t *testing.T) {
 	p.SetDevices(inventory.Build([]sysfs.Function{
 		{BDF: "0000:9c:00.0", Class: 0x020000, IOMMUGroup: "60"},
 		{BDF: "0000:bc:00.0", Class: 0x020000, IOMMUGroup: "70"},
-	}, nil, deviceattribute.WithFSFromRoot(t.TempDir())))
+	}, inventory.Merged{}, deviceattribute.WithFSFromRoot(t.TempDir())))
 	ids, err := prepare(t, p, claim(opaqueConfig(NicConfig{GuestRDMA: true}, resourceapi.AllocationConfigSourceClass)))
 	if err != nil {
 		t.Fatal(err)
@@ -227,5 +227,18 @@ func TestPrepareGuestRDMASkipsEthernet(t *testing.T) {
 		if id == driver+"/nic="+cdi.GuestRDMADevice {
 			t.Errorf("guest RDMA device for Ethernet functions: %v", ids)
 		}
+	}
+}
+
+func TestPrepareSubrequestUsesParentConfig(t *testing.T) {
+	p := newPlugin(t)
+	c := claim(opaque(cdi.BackendIommufd, resourceapi.AllocationConfigSourceClaim, "nic0"))
+	c.Status.Allocation.Devices.Results[0].Request = "nic0/fast"
+	ids, err := prepare(t, p, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids[0] != driver+"/nic=0000-9c-00-0-iommufd" {
+		t.Errorf("parent config not applied to subrequest: %v", ids)
 	}
 }

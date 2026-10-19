@@ -6,7 +6,7 @@ Pair a NIC with a GPU from another driver, such as the NVIDIA GPU DRA driver, by
 
 ## Devices
 
-One device per PCI function whose class is a network controller and whose driver is vfio-pci or a vendor variant of it (`mlx5_vfio_pci`). A physical function that still has VFs enabled is skipped. The device name is the PCI address with `:` and `.` replaced by `-`.
+One device per PCI function whose class is a network controller and whose driver is vfio-pci or a vendor variant of it (`mlx5_vfio_pci`). A physical function that still has VFs enabled is skipped. So is a function whose IOMMU group holds any other device that is not a bridge: a VM given the group's VFIO node gets every member, so that device would be handed out with it. The device name is the PCI address with `:` and `.` replaced by `-`.
 
 | Attribute | Value |
 |---|---|
@@ -49,7 +49,7 @@ The CDI spec (`/var/run/cdi/fabric-nic.inerplat.github.io_nic.json`) lists each 
 | `<name>-legacy` | `/dev/vfio/<group>`, `/dev/vfio/vfio` |
 | `<name>-iommufd` | `/dev/vfio/devices/vfioN`, `/dev/iommu` (only with a VFIO cdev) |
 
-A VM runtime attaches one device per node it is given, so a claim gets exactly one backend: `--vfio-backend` (default `legacy`), overridden by a `NicConfig` in the class or claim. A claim config overrides a class config, and a config naming requests overrides one that names none:
+A VM runtime attaches one device per node it is given, so a claim gets exactly one backend: `--vfio-backend` (default `legacy`), overridden by a `NicConfig` in the class or claim. A claim config overrides a class config, and a config naming requests overrides one that names none. A config for a request also applies to its first-available subrequests (`nic/fast`):
 
 ```yaml
 config:

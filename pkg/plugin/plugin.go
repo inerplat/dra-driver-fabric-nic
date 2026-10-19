@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	resourceapi "k8s.io/api/resource/v1"
@@ -99,12 +100,19 @@ func (p *Plugin) prepare(claim *resourceapi.ResourceClaim) ([]kubeletplugin.Devi
 		if !ok {
 			return nil, fmt.Errorf("device %s is no longer on this node", r.Device)
 		}
+		// A result of a first-available subrequest is named <request>/<sub>;
+		// a config for the parent request applies to it, and one naming the
+		// subrequest applies on top.
 		cfg := requestConfig{backend: p.DefaultBackend}
-		if c, ok := configs[""]; ok {
-			cfg = merge(cfg, c)
+		names := []string{""}
+		if parent, _, ok := strings.Cut(r.Request, "/"); ok {
+			names = append(names, parent)
 		}
-		if c, ok := configs[r.Request]; ok {
-			cfg = merge(cfg, c)
+		names = append(names, r.Request)
+		for _, name := range names {
+			if c, ok := configs[name]; ok {
+				cfg = merge(cfg, c)
+			}
 		}
 		if cfg.backend == cdi.BackendIommufd && d.Function.Cdev == "" {
 			return nil, fmt.Errorf("device %s has no VFIO cdev for the iommufd backend", r.Device)
@@ -176,7 +184,7 @@ func (p *Plugin) resolveConfigs(configs []resourceapi.DeviceAllocationConfigurat
 }
 
 // metadataAttributes is what a VM runtime reads to find the device on the
-// host; KubeVirt assigns the device at this PCI address.
+// host; it assigns the device at this PCI address.
 func metadataAttributes(d inventory.Device) map[string]resourceapi.DeviceAttribute {
 	attrs := map[string]resourceapi.DeviceAttribute{
 		string(deviceattribute.StandardDeviceAttributePCIBusID): {StringValue: ptr.To(d.Function.BDF)},

@@ -20,6 +20,14 @@ type TestFunc struct {
 	NUMA   int
 	Group  string
 	Cdev   string
+
+	// IBDev, when set, adds infiniband/<IBDev>/ports/1 with PortState,
+	// SMLid and GID0 (the first GID, prefix first).
+	IBDev     string
+	PortState string // e.g. "4: ACTIVE"
+	SMLid     string // e.g. "0x1"
+	GID0      string // e.g. "fe80:0000:0000:0000:58a2:e103:0080:35a8"
+	Netdev    string // adds net/<Netdev>
 }
 
 // BuildTestTree lays out a minimal sysfs under root for tests: the device
@@ -70,6 +78,31 @@ func BuildTestTree(root string, funcs []TestFunc) error {
 		}
 		if err := os.Symlink(filepath.Join("..", "..", "..", "devices", f.Root, f.BDF), filepath.Join(bus, f.BDF)); err != nil {
 			return err
+		}
+		if f.Group != "" {
+			g := filepath.Join(root, "kernel", "iommu_groups", f.Group, "devices")
+			if err := os.MkdirAll(g, 0o755); err != nil {
+				return err
+			}
+			if err := os.Symlink(filepath.Join("..", "..", "..", "..", "devices", f.Root, f.BDF), filepath.Join(g, f.BDF)); err != nil {
+				return err
+			}
+		}
+		if f.IBDev != "" {
+			port := filepath.Join(dev, "infiniband", f.IBDev, "ports", "1")
+			if err := os.MkdirAll(filepath.Join(port, "gids"), 0o755); err != nil {
+				return err
+			}
+			for name, v := range map[string]string{"state": f.PortState, "sm_lid": f.SMLid, "gids/0": f.GID0} {
+				if err := os.WriteFile(filepath.Join(port, name), []byte(v+"\n"), 0o644); err != nil {
+					return err
+				}
+			}
+		}
+		if f.Netdev != "" {
+			if err := os.MkdirAll(filepath.Join(dev, "net", f.Netdev), 0o755); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

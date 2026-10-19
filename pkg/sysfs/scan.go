@@ -103,8 +103,29 @@ func Scan(root string) ([]Function, []string, error) {
 		found = append(found, fn)
 	}
 
+	found, skipped = viableGroups(root, found, skipped)
 	sort.Slice(found, func(i, j int) bool { return found[i].BDF < found[j].BDF })
 	return found, skipped, nil
+}
+
+// viableGroups keeps a function only when its IOMMU group holds nothing else
+// but bridges: a VM given the group's VFIO node gets every member, so any
+// other device in the group would be handed out with it.
+func viableGroups(root string, funcs []Function, skipped []string) ([]Function, []string) {
+	var out []Function
+	for _, fn := range funcs {
+		members, err := GroupMembers(root, fn.IOMMUGroup)
+		if err != nil {
+			skipped = append(skipped, fmt.Sprintf("%s: read IOMMU group %s: %v", fn.BDF, fn.IOMMUGroup, err))
+			continue
+		}
+		if other := OtherMembers(members, fn.BDF); len(other) > 0 {
+			skipped = append(skipped, fmt.Sprintf("%s: IOMMU group %s also holds %s", fn.BDF, fn.IOMMUGroup, strings.Join(other, ", ")))
+			continue
+		}
+		out = append(out, fn)
+	}
+	return out, skipped
 }
 
 func linkBase(path string) string {

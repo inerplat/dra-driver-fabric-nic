@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	resourceapi "k8s.io/api/resource/v1"
@@ -31,7 +32,7 @@ func TestBuild(t *testing.T) {
 	extra := map[string]map[resourceapi.QualifiedName]resourceapi.DeviceAttribute{
 		"0000:9c:00.0": {"example.com/fabric": {StringValue: &role}},
 	}
-	devices := Build(funcs, extra, deviceattribute.WithFSFromRoot(root))
+	devices := Build(funcs, Merged{Attrs: extra, Source: map[string]string{"0000:9c:00.0": SourceFile}}, deviceattribute.WithFSFromRoot(root))
 	if len(devices) != 2 {
 		t.Fatalf("got %d devices", len(devices))
 	}
@@ -70,6 +71,9 @@ func TestBuild(t *testing.T) {
 	if _, ok := vf.Attributes["example.com/fabric"]; ok {
 		t.Errorf("attribute of another device leaked")
 	}
+	if a := vf.Attributes[AttrRoleSource]; a.StringValue == nil || *a.StringValue != SourceNone {
+		t.Errorf("roleSource of a device no file names = %+v", a)
+	}
 }
 
 func writeFile(t *testing.T, body string) string {
@@ -101,15 +105,51 @@ func TestLoadExtra(t *testing.T) {
 	}
 
 	for name, body := range map[string]string{
-		"version":       `{"version":"v2","devices":{}}`,
-		"no domain":     `{"version":"v1","devices":{"0000:9c:00.0":{"fabric":{"string":"x"}}}}`,
-		"driver domain": `{"version":"v1","devices":{"0000:9c:00.0":{"fabric-nic.example.com/function":{"string":"x"}}}}`,
-		"standard":      `{"version":"v1","devices":{"0000:9c:00.0":{"resource.kubernetes.io/pcieRoot":{"string":"x"}}}}`,
-		"two values":    `{"version":"v1","devices":{"0000:9c:00.0":{"example.com/a":{"string":"x","int":1}}}}`,
-		"no value":      `{"version":"v1","devices":{"0000:9c:00.0":{"example.com/a":{}}}}`,
+		"version":         `{"version":"v2","devices":{}}`,
+		"no domain":       `{"version":"v1","devices":{"0000:9c:00.0":{"fabric":{"string":"x"}}}}`,
+		"driver domain":   `{"version":"v1","devices":{"0000:9c:00.0":{"fabric-nic.example.com/function":{"string":"x"}}}}`,
+		"standard":        `{"version":"v1","devices":{"0000:9c:00.0":{"resource.kubernetes.io/pcieRoot":{"string":"x"}}}}`,
+		"two values":      `{"version":"v1","devices":{"0000:9c:00.0":{"example.com/a":{"string":"x","int":1}}}}`,
+		"no value":        `{"version":"v1","devices":{"0000:9c:00.0":{"example.com/a":{}}}}`,
+		"bad name":        `{"version":"v1","devices":{"0000:9c:00.0":{"example.com/has-dash":{"string":"x"}}}}`,
+		"bad domain":      `{"version":"v1","devices":{"0000:9c:00.0":{"Example_Com/a":{"string":"x"}}}}`,
+		"long string":     `{"version":"v1","devices":{"0000:9c:00.0":{"example.com/a":{"string":"` + strings.Repeat("x", 65) + `"}}}}`,
+		"bad version":     `{"version":"v1","devices":{"0000:9c:00.0":{"example.com/a":{"version":"1.2"}}}}`,
+		"zero prerelease": `{"version":"v1","devices":{"0000:9c:00.0":{"example.com/a":{"version":"1.2.3-01"}}}}`,
 	} {
 		if _, err := LoadExtra(writeFile(t, body), "b1", reserved); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+func TestLoadAll(t *testing.T) {
+	reserved := Reserved(driver)
+	admin := writeFile(t, `{"version":"v1","devices":{"0000:9c:00.0":{"example.com/fabric":{"string":"host"}}}}`)
+	generated := writeFile(t, `{"version":"v1","bootID":"b1","devices":{
+		"0000:9c:00.0":{"example.com/fabric":{"string":"compute"},"example.com/extra":{"string":"x"}},
+		"0000:bc:00.0":{"example.com/fabric":{"string":"compute"}}}}`)
+
+	m := LoadAll([]string{admin, generated}, "b1", reserved)
+	if v := m.Attrs["0000:9c:00.0"]["example.com/fabric"].StringValue; v == nil || *v != "host" || m.Source["0000:9c:00.0"] != SourceFile {
+		t.Errorf("admin entry did not win: %+v %v", m.Attrs["0000:9c:00.0"], m.Source)
+	}
+	if _, ok := m.Attrs["0000:9c:00.0"]["example.com/extra"]; ok {
+		t.Errorf("generated attribute merged into a device the admin file names")
+	}
+	if m.Source["0000:bc:00.0"] != SourceAuto {
+		t.Errorf("generated entry source = %q", m.Source["0000:bc:00.0"])
+	}
+
+	noBoot := writeFile(t, `{"version":"v1","devices":{"0000:bc:00.0":{"example.com/fabric":{"string":"compute"}}}}`)
+	m = LoadAll([]string{filepath.Join(t.TempDir(), "absent.json"), noBoot}, "b1", reserved)
+	if m.Files[0].State != "missing" || m.Files[1].State != "invalid" || len(m.Attrs) != 0 {
+		t.Errorf("states %+v attrs %v", m.Files, m.Attrs)
+	}
+
+	stale := writeFile(t, `{"version":"v1","bootID":"old","devices":{"0000:bc:00.0":{"example.com/fabric":{"string":"compute"}}}}`)
+	m = LoadAll([]string{admin, stale}, "b1", reserved)
+	if m.Files[1].State != "stale" || m.Source["0000:bc:00.0"] != "" {
+		t.Errorf("stale generated file used: %+v", m)
 	}
 }

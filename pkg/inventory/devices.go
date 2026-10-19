@@ -18,6 +18,9 @@ const (
 	AttrVendor   resourceapi.QualifiedName = "vendor"
 	AttrDevice   resourceapi.QualifiedName = "device"
 	AttrParentPF resourceapi.QualifiedName = "parentPF"
+	// AttrRoleSource says where the device's file attributes came from: file,
+	// auto or none.
+	AttrRoleSource resourceapi.QualifiedName = "roleSource"
 
 	// AttrNUMANode has the name and form the NVIDIA GPU driver publishes, so
 	// a claim can match NICs and GPUs on it.
@@ -37,9 +40,8 @@ func DeviceName(bdf string) string {
 	return strings.NewReplacer(":", "-", ".", "-").Replace(bdf)
 }
 
-// Build makes one device per function. extra holds attributes keyed by PCI
-// address from the attribute file.
-func Build(funcs []sysfs.Function, extra map[string]map[resourceapi.QualifiedName]resourceapi.DeviceAttribute, mods ...deviceattribute.MachineModifier) []Device {
+// Build makes one device per function, with the merged file attributes.
+func Build(funcs []sysfs.Function, extra Merged, mods ...deviceattribute.MachineModifier) []Device {
 	devices := make([]Device, 0, len(funcs))
 	for _, fn := range funcs {
 		attrs := map[resourceapi.QualifiedName]resourceapi.DeviceAttribute{
@@ -60,9 +62,14 @@ func Build(funcs []sysfs.Function, extra map[string]map[resourceapi.QualifiedNam
 		if a, err := deviceattribute.GetPCIeRootAttributeByPCIBusID(fn.BDF, mods...); err == nil {
 			attrs[a.Name] = a.Value
 		}
-		for name, value := range extra[fn.BDF] {
+		for name, value := range extra.Attrs[fn.BDF] {
 			attrs[name] = value
 		}
+		source := extra.Source[fn.BDF]
+		if source == "" {
+			source = SourceNone
+		}
+		attrs[AttrRoleSource] = resourceapi.DeviceAttribute{StringValue: ptr.To(source)}
 		name := DeviceName(fn.BDF)
 		devices = append(devices, Device{
 			Name:     name,

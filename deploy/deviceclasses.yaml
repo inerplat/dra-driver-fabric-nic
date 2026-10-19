@@ -8,9 +8,8 @@ spec:
   - cel:
       expression: device.driver == 'fabric-nic.inerplat.github.io'
 ---
-# Whole InfiniBand PFs that the attribute file names as compute fabric. A
-# function without the attribute never matches, so a node whose attribute
-# file is missing or stale hands out none.
+# Whole InfiniBand PFs that the admin attribute file names as compute fabric.
+# A function the file does not name never matches.
 apiVersion: resource.k8s.io/v1
 kind: DeviceClass
 metadata:
@@ -22,6 +21,7 @@ spec:
         device.driver == 'fabric-nic.inerplat.github.io' &&
         device.attributes['fabric-nic.inerplat.github.io'].function == 'pf' &&
         device.attributes['fabric-nic.inerplat.github.io'].linkType == 'infiniband' &&
+        device.attributes['fabric-nic.inerplat.github.io'].roleSource == 'file' &&
         'fabric' in device.attributes['example.com'] &&
         device.attributes['example.com'].fabric == 'compute'
 ---
@@ -39,6 +39,47 @@ spec:
         device.driver == 'fabric-nic.inerplat.github.io' &&
         device.attributes['fabric-nic.inerplat.github.io'].function == 'pf' &&
         device.attributes['fabric-nic.inerplat.github.io'].linkType == 'infiniband' &&
+        device.attributes['fabric-nic.inerplat.github.io'].roleSource == 'file' &&
+        'fabric' in device.attributes['example.com'] &&
+        device.attributes['example.com'].fabric == 'compute'
+  config:
+  - opaque:
+      driver: fabric-nic.inerplat.github.io
+      parameters:
+        apiVersion: fabric-nic.inerplat.github.io/v1alpha1
+        kind: NicConfig
+        guestRDMA: true
+---
+# Like ib-pf-compute, but also accepts a compute role that fabric-nic-prep
+# inferred. An inferred role can be wrong; see the README.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: ib-pf-compute-auto.fabric-nic.inerplat.github.io
+spec:
+  selectors:
+  - cel:
+      expression: >-
+        device.driver == 'fabric-nic.inerplat.github.io' &&
+        device.attributes['fabric-nic.inerplat.github.io'].function == 'pf' &&
+        device.attributes['fabric-nic.inerplat.github.io'].linkType == 'infiniband' &&
+        device.attributes['fabric-nic.inerplat.github.io'].roleSource in ['file', 'auto'] &&
+        'fabric' in device.attributes['example.com'] &&
+        device.attributes['example.com'].fabric == 'compute'
+---
+# ib-pf-compute-guest that also accepts an inferred compute role.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: ib-pf-compute-auto-guest.fabric-nic.inerplat.github.io
+spec:
+  selectors:
+  - cel:
+      expression: >-
+        device.driver == 'fabric-nic.inerplat.github.io' &&
+        device.attributes['fabric-nic.inerplat.github.io'].function == 'pf' &&
+        device.attributes['fabric-nic.inerplat.github.io'].linkType == 'infiniband' &&
+        device.attributes['fabric-nic.inerplat.github.io'].roleSource in ['file', 'auto'] &&
         'fabric' in device.attributes['example.com'] &&
         device.attributes['example.com'].fabric == 'compute'
   config:

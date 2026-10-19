@@ -76,3 +76,91 @@ func TestIsVFIODriver(t *testing.T) {
 		}
 	}
 }
+
+func TestScanIOMMUGroups(t *testing.T) {
+	root := t.TempDir()
+	if err := sysfstest.BuildTestTree(root, []sysfstest.TestFunc{
+		// Shares group 70 with a function still on its host driver.
+		{BDF: "0000:bc:00.0", Root: "pci0000:b7", Class: "0x020700", Vendor: "0x15b3", Device: "0x101b", Driver: "vfio-pci", Group: "70"},
+		{BDF: "0000:bc:00.1", Root: "pci0000:b7", Class: "0x020700", Vendor: "0x15b3", Device: "0x101b", Driver: "mlx5_core", Group: "70"},
+		// Two vfio functions in group 80: both are held back.
+		{BDF: "0000:cc:00.0", Root: "pci0000:c7", Class: "0x020700", Vendor: "0x15b3", Device: "0x101b", Driver: "vfio-pci", Group: "80"},
+		{BDF: "0000:cc:00.1", Root: "pci0000:c7", Class: "0x020700", Vendor: "0x15b3", Device: "0x101b", Driver: "vfio-pci", Group: "80"},
+		// A bridge in the group does not need a driver.
+		{BDF: "0000:da:00.0", Root: "pci0000:d7", Class: "0x060400", Vendor: "0x10b5", Device: "0xc010", Group: "90"},
+		{BDF: "0000:dc:00.0", Root: "pci0000:d7", Class: "0x020700", Vendor: "0x15b3", Device: "0x101b", Driver: "vfio-pci", Group: "90"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	funcs, skipped, err := Scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(funcs) != 1 || funcs[0].BDF != "0000:dc:00.0" {
+		t.Errorf("published %+v, skipped %v", funcs, skipped)
+	}
+	if len(skipped) != 3 {
+		t.Errorf("skipped = %v", skipped)
+	}
+}
+
+func TestGPUs(t *testing.T) {
+	root := t.TempDir()
+	if err := sysfstest.BuildTestTree(root, []sysfstest.TestFunc{
+		{BDF: "0000:9b:00.0", Root: "pci0000:97", Class: "0x030200", Vendor: "0x10de", Device: "0x2330", Driver: "vfio-pci"},
+		// A BMC VGA: display class from a non-GPU vendor.
+		{BDF: "0000:03:00.0", Root: "pci0000:00", Class: "0x030000", Vendor: "0x1a03", Device: "0x2000", Driver: "ast"},
+		// A display-class GPU from an allowed vendor.
+		{BDF: "0000:41:00.0", Root: "pci0000:40", Class: "0x030000", Vendor: "0x10de", Device: "0x2236"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	gpus, excluded, err := GPUs(root, []string{"0x10de"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gpus) != 2 || gpus[0].BDF != "0000:41:00.0" || gpus[1].BDF != "0000:9b:00.0" {
+		t.Errorf("gpus %+v", gpus)
+	}
+	if len(excluded) != 1 {
+		t.Errorf("excluded %v", excluded)
+	}
+}
+
+func TestHostIBPorts(t *testing.T) {
+	root := t.TempDir()
+	if err := sysfstest.BuildTestTree(root, []sysfstest.TestFunc{
+		{BDF: "0000:9c:00.0", Root: "pci0000:97", Class: "0x020700", Vendor: "0x15b3", Device: "0x101b", Driver: "mlx5_core", Group: "60",
+			IBDev: "mlx5_4", PortState: "4: ACTIVE", SMLid: "0x1", GID0: "fe80:0000:0000:0000:58a2:e103:0080:35a8", Netdev: "ibp156s0"},
+		{BDF: "0000:bc:00.0", Root: "pci0000:b7", Class: "0x020700", Vendor: "0x15b3", Device: "0x101b", Driver: "vfio-pci", Group: "70"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ports, err := HostIBPorts(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ports) != 1 {
+		t.Fatalf("ports %+v", ports)
+	}
+	p := ports[0]
+	if p.IBDev != "mlx5_4" || p.PortState != "ACTIVE" || p.SMLid != 1 || p.Prefix != "fe80:0000:0000:0000" || len(p.Netdevs) != 1 || p.IOMMUGroup != "60" {
+		t.Errorf("port %+v", p)
+	}
+}
+
+func TestScanRefusesGroupWithAGPU(t *testing.T) {
+	root := t.TempDir()
+	if err := sysfstest.BuildTestTree(root, []sysfstest.TestFunc{
+		{BDF: "0000:9b:00.0", Root: "pci0000:97", Class: "0x030200", Vendor: "0x10de", Device: "0x2330", Driver: "vfio-pci", Group: "50"},
+		{BDF: "0000:9c:00.0", Root: "pci0000:97", Class: "0x020700", Vendor: "0x15b3", Device: "0x101b", Driver: "vfio-pci", Group: "50"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if funcs, _, _ := Scan(root); len(funcs) != 0 {
+		t.Errorf("NIC sharing a group with a GPU was published: %+v", funcs)
+	}
+	if all, _ := VFIOIBFunctions(root); len(all) != 1 {
+		t.Errorf("unfiltered list %v", all)
+	}
+}

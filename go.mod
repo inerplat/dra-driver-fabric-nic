@@ -3,6 +3,7 @@ module github.com/inerplat/dra-driver-fabric-nic
 go 1.26.9
 
 require (
+	github.com/blang/semver/v4 v4.0.0
 	k8s.io/api v0.36.3
 	k8s.io/apimachinery v0.36.3
 	k8s.io/client-go v0.36.3

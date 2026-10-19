@@ -54,7 +54,7 @@ func main() {
 	flag.StringVar(&o.kubeconfig, "kubeconfig", "", "kubeconfig path; in-cluster config when empty")
 	flag.StringVar(&o.sysRoot, "sys-root", envOr("SYS_ROOT", "/sys"), "sysfs mount to scan")
 	flag.StringVar(&o.cdiDir, "cdi-dir", envOr("CDI_DIR", "/var/run/cdi"), "directory for the CDI spec")
-	flag.StringVar(&o.attributesFile, "attributes-file", os.Getenv("ATTRIBUTES_FILE"), "JSON file with extra attributes per PCI address")
+	flag.StringVar(&o.attributesFile, "attributes-file", os.Getenv("ATTRIBUTES_FILE"), "comma-separated attribute files, in precedence order: the admin file first, then generated files")
 	flag.StringVar(&o.defaultBackend, "vfio-backend", envOr("VFIO_BACKEND", cdi.BackendLegacy), "VFIO backend when a claim does not choose one: legacy or iommufd")
 	flag.DurationVar(&o.interval, "rescan-interval", 30*time.Second, "how often to rescan sysfs and the attribute file")
 	flag.StringVar(&o.registrarDir, "registrar-dir", kubeletplugin.KubeletRegistryDir, "kubelet plugin registration directory")
@@ -184,18 +184,26 @@ func snapshot(o options) (state, error) {
 	for _, s := range skipped {
 		klog.V(2).InfoS("skipping function", "reason", s)
 	}
-	extra, err := inventory.LoadExtra(o.attributesFile, bootID(o.sysRoot), inventory.Reserved(o.driverName))
-	if err != nil {
-		// Publish without the extra attributes rather than with wrong ones.
-		klog.ErrorS(err, "ignoring the attribute file")
-		extra = nil
+	extra := inventory.LoadAll(splitList(o.attributesFile), bootID(o.sysRoot), inventory.Reserved(o.driverName))
+	for _, f := range extra.Files {
+		if f.State != "ok" && f.State != "missing" {
+			// Publish without this file rather than with wrong attributes.
+			klog.ErrorS(f.Err, "ignoring an attribute file", "path", f.Path, "state", f.State)
+		}
 	}
 	devices := inventory.Build(funcs, extra, deviceattribute.WithFSFromRoot(o.sysRoot))
-	slices := make([]resourceapi.Device, 0, len(devices))
-	for _, d := range devices {
-		slices = append(slices, d.Slice)
+	// The identity covers what prepare and the CDI spec use, not only what
+	// is published: a new IOMMU group or cdev must refresh the spec too.
+	type identity struct {
+		Slice      resourceapi.Device
+		IOMMUGroup string
+		Cdev       string
 	}
-	b, err := json.Marshal(slices)
+	ids := make([]identity, 0, len(devices))
+	for _, d := range devices {
+		ids = append(ids, identity{d.Slice, d.Function.IOMMUGroup, d.Function.Cdev})
+	}
+	b, err := json.Marshal(ids)
 	if err != nil {
 		return state{}, err
 	}
@@ -239,6 +247,16 @@ func kubeClient(kubeconfig string) (kubernetes.Interface, error) {
 		return nil, fmt.Errorf("kube config: %w", err)
 	}
 	return kubernetes.NewForConfig(cfg)
+}
+
+func splitList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func envOr(key, def string) string {
