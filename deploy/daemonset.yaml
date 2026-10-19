@@ -19,6 +19,43 @@ spec:
         fabric-nic.inerplat.github.io/enabled: "true"
       tolerations:
       - operator: Exists
+      # fabric-nic-prep runs once per pod start: it decides the role of every
+      # Mellanox PF from the node's mode label and port annotations, binds the
+      # vfio-pci ones, and writes the attribute files the plugin reads. Only
+      # this container is privileged; it enters the host's network and PID
+      # namespaces itself, so the pod does not share them.
+      initContainers:
+      - name: prep
+        image: fabric-nic-prep:dev
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        # Mode of a node without the fabric-nic.inerplat.github.io/mode
+        # label: auto, report or off.
+        - name: DEFAULT_MODE
+          value: report
+        securityContext:
+          privileged: true
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            memory: 128Mi
+        volumeMounts:
+        - name: host-proc
+          mountPath: /host/proc
+          readOnly: true
+        - name: host-sys
+          mountPath: /host/sys
+        - name: attributes
+          mountPath: /var/lib/fabric-nic
       containers:
       - name: plugin
         image: fabric-nic-plugin:dev
@@ -62,3 +99,9 @@ spec:
         hostPath:
           path: /var/lib/fabric-nic
           type: DirectoryOrCreate
+      - name: host-proc
+        hostPath:
+          path: /proc
+      - name: host-sys
+        hostPath:
+          path: /sys

@@ -4,8 +4,8 @@ COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags=-s -o /fabric-nic-prep ./cmd/fabric-nic-prep
 
 # sminfo and smpquery read the fabric; rdma lists queue pairs for the
-# host-use check.
+# host-use check; nsenter enters the host's namespaces.
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends infiniband-diags iproute2 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends infiniband-diags iproute2 util-linux && rm -rf /var/lib/apt/lists/*
 COPY --from=build /fabric-nic-prep /fabric-nic-prep
 ENTRYPOINT ["/fabric-nic-prep"]

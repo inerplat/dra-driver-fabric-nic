@@ -15,30 +15,27 @@ import (
 
 // File names under the state directory.
 const (
-	ReportFile    = "report.json"
-	GeneratedFile = "attributes.generated.json" // read by the plugin
-	ProposedFile  = "attributes.proposed.json"  // report level; for review only
+	ReportFile = "report.json"
+	// DeclaredFile and GeneratedFile are the plugin's attribute files, in
+	// precedence order: declared roles first, so the plugin stamps them
+	// roleSource=file, then detected roles, stamped roleSource=auto.
+	DeclaredFile  = "attributes.json"
+	GeneratedFile = "attributes.generated.json"
+	AutoFile      = "auto.json" // this boot's detection, by port ID
 	BindFile      = "binds.json"
+	LockFile      = "lock"
 )
 
-// RoleAttribute is the attribute prep writes for a compute port.
+// RoleAttribute carries a port's role to the plugin.
 const RoleAttribute resourceapi.QualifiedName = "example.com/fabric"
 
-// Detector names the classifier and its version in generated files.
-const Detector = "classifyHGX/v1"
-
-// generatedFile is the attribute file schema with prep's header fields,
-// which the plugin ignores.
-type generatedFile struct {
-	inventory.ExtraFile
-	GeneratedBy string `json:"generatedBy"`
-	Level       string `json:"level"`
-	Detector    string `json:"detector"`
-}
+// Detector names the classifier and its version.
+const Detector = "classifyHGX/v2"
 
 // BindRecord is a function prep moved to vfio-pci during one boot.
 type BindRecord struct {
 	BDF            string   `json:"bdf"`
+	ID             string   `json:"id"`
 	IBDev          string   `json:"ibdev,omitempty"`
 	Netdevs        []string `json:"netdevs,omitempty"`
 	OriginalDriver string   `json:"originalDriver"`
@@ -51,21 +48,43 @@ type bindFile struct {
 	Binds  []BindRecord `json:"binds"`
 }
 
-// Report is everything a pass saw and decided, for people and alerts.
+// autoFile keeps a matched detection for the rest of the boot: once prep
+// binds the compute ports it can no longer probe them.
+type autoFile struct {
+	BootID      string      `json:"bootID"`
+	Detector    string      `json:"detector"`
+	Fingerprint string      `json:"fingerprint"`
+	Compute     []string    `json:"compute"` // port IDs
+	Facts       []PortFacts `json:"facts"`
+}
+
+// PortResult is what prep decided and did for one function.
+type PortResult struct {
+	Function
+	Role   string `json:"role,omitempty"`
+	Bind   string `json:"bind,omitempty"`
+	Source string `json:"source,omitempty"` // declared or auto
+	Result string `json:"result"`
+	Reason string `json:"reason,omitempty"`
+	Fabric string `json:"fabric,omitempty"` // subnet prefix / SM GUID
+}
+
+// Report is everything one run saw and decided.
 type Report struct {
+	Node         string       `json:"node"`
 	BootID       string       `json:"bootID"`
-	Level        string       `json:"level"`
+	Mode         string       `json:"mode"`
 	Detector     string       `json:"detector"`
 	Updated      string       `json:"updated"`
-	Outcome      Outcome      `json:"outcome"`
-	Frozen       bool         `json:"frozen,omitempty"`
-	Retries      int          `json:"retries,omitempty"`
+	Fatal        string       `json:"fatal,omitempty"` // why nothing was bound
+	Auto         *Outcome     `json:"auto,omitempty"`
 	GPUs         []GPUInfo    `json:"gpus"`
 	ExcludedGPUs []string     `json:"excludedDisplayDevices,omitempty"`
-	Ports        []PortFacts  `json:"ports"`
-	Unprobed     []string     `json:"unprobed,omitempty"`
-	Conflicts    []string     `json:"conflicts,omitempty"`
-	BindNotes    []string     `json:"bindNotes,omitempty"`
+	Ports        []PortResult `json:"ports"`
+	Stale        []string     `json:"stale,omitempty"`
+	Invalid      []string     `json:"invalid,omitempty"`
+	Unknown      []string     `json:"unknown,omitempty"`
+	Facts        []PortFacts  `json:"facts,omitempty"`
 	Binds        []BindRecord `json:"binds,omitempty"`
 }
 
@@ -93,21 +112,17 @@ func writeJSON(path string, v any) error {
 	return os.Rename(tmp, path)
 }
 
-// writeAttributes writes the compute roles as an attribute file, and checks
-// the result with the plugin's own loader before it replaces anything.
-func writeAttributes(path, bootID, level, version string, compute []string, reserved func(resourceapi.QualifiedName) bool) error {
-	f := generatedFile{
-		ExtraFile: inventory.ExtraFile{
-			Version: inventory.ExtraVersion,
-			BootID:  bootID,
-			Devices: map[string]map[resourceapi.QualifiedName]resourceapi.DeviceAttribute{},
-		},
-		GeneratedBy: "fabric-nic-prep " + version,
-		Level:       level,
-		Detector:    Detector,
+// writeAttributes writes roles by PCI address as an attribute file for this
+// boot, and checks it with the plugin's own loader before it replaces
+// anything.
+func writeAttributes(path, bootID string, roles map[string]string, reserved func(resourceapi.QualifiedName) bool) error {
+	f := inventory.ExtraFile{
+		Version: inventory.ExtraVersion,
+		BootID:  bootID,
+		Devices: map[string]map[resourceapi.QualifiedName]resourceapi.DeviceAttribute{},
 	}
-	for _, bdf := range compute {
-		f.Devices[bdf] = map[resourceapi.QualifiedName]resourceapi.DeviceAttribute{RoleAttribute: {StringValue: ptr.To("compute")}}
+	for bdf, role := range roles {
+		f.Devices[bdf] = map[resourceapi.QualifiedName]resourceapi.DeviceAttribute{RoleAttribute: {StringValue: ptr.To(role)}}
 	}
 	check := path + ".check"
 	if err := writeJSON(check, f); err != nil {
@@ -115,33 +130,21 @@ func writeAttributes(path, bootID, level, version string, compute []string, rese
 	}
 	if _, err := inventory.LoadExtra(check, bootID, reserved); err != nil {
 		os.Remove(check)
-		return fmt.Errorf("generated file failed validation: %w", err)
+		return fmt.Errorf("attribute file failed validation: %w", err)
 	}
 	return os.Rename(check, path)
 }
 
-// frozenFor reports whether path holds a valid classification for this
-// boot: it must pass the plugin's own loader and carry this detector.
-func frozenFor(path, bootID string, reserved func(resourceapi.QualifiedName) bool) (map[string]bool, bool) {
-	b, err := os.ReadFile(path)
+func loadAuto(dir, bootID string) (autoFile, bool) {
+	b, err := os.ReadFile(filepath.Join(dir, AutoFile))
 	if err != nil {
-		return nil, false
+		return autoFile{}, false
 	}
-	var f generatedFile
+	var f autoFile
 	if json.Unmarshal(b, &f) != nil || f.BootID != bootID || f.Detector != Detector {
-		return nil, false
+		return autoFile{}, false
 	}
-	devices, err := inventory.LoadExtra(path, bootID, reserved)
-	if err != nil {
-		return nil, false
-	}
-	compute := map[string]bool{}
-	for bdf, attrs := range devices {
-		if v := attrs[RoleAttribute].StringValue; v != nil && *v == "compute" {
-			compute[bdf] = true
-		}
-	}
-	return compute, true
+	return f, true
 }
 
 func loadBinds(dir, bootID string) ([]BindRecord, error) {

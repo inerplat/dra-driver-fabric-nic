@@ -63,18 +63,27 @@ type Outcome struct {
 // anywhere else. Those ports are the compute fabric. Any other shape is left
 // unclassified, with the clause that failed.
 //
-// unprobed lists InfiniBand functions under a GPU root that were already on
-// vfio-pci, whose facts cannot be read; any of them makes the pass unmatched.
+// unprobed lists InfiniBand functions that are not on a host driver and were
+// not bound by prep, whose facts cannot be read; any of them makes the pass
+// unmatched.
 func classifyHGX(gpus []GPUInfo, ports []PortFacts, unprobed []string) Outcome {
 	if len(gpus) == 0 {
 		return Outcome{Result: Unmatched, Reason: "no GPUs on this node"}
 	}
 	gpusPerRoot := map[string][]string{}
 	for _, g := range gpus {
+		if g.Root == "" {
+			return Outcome{Result: Incomplete, Reason: "cannot find the PCIe root of GPU " + g.BDF}
+		}
 		gpusPerRoot[g.Root] = append(gpusPerRoot[g.Root], g.BDF)
 	}
 	if len(unprobed) > 0 {
-		return Outcome{Result: Unmatched, Reason: fmt.Sprintf("InfiniBand functions under GPU roots are already bound to vfio-pci and cannot be probed: %s", strings.Join(unprobed, ", "))}
+		return Outcome{Result: Unmatched, Reason: fmt.Sprintf("InfiniBand functions that prep did not bind are off their host driver and cannot be probed: %s", strings.Join(unprobed, ", "))}
+	}
+	for _, p := range ports {
+		if p.Root == "" {
+			return Outcome{Result: Incomplete, Reason: "cannot find the PCIe root of port " + p.BDF}
+		}
 	}
 
 	// (a) every port has all its facts. A port anywhere with unknown facts
@@ -169,7 +178,7 @@ func sameFabricFacts(a, b []PortFacts) (bool, string) {
 		if !ok {
 			return false, fmt.Sprintf("port %s appeared during the pass", q.BDF)
 		}
-		if p.Prefix != q.Prefix || p.SMLid != q.SMLid || p.SMGUID != q.SMGUID || p.Status != q.Status {
+		if p.Root != q.Root || p.Prefix != q.Prefix || p.SMLid != q.SMLid || p.SMGUID != q.SMGUID || p.Status != q.Status {
 			return false, fmt.Sprintf("fabric changed during the pass on %s", q.BDF)
 		}
 	}

@@ -54,7 +54,7 @@ func main() {
 	flag.StringVar(&o.kubeconfig, "kubeconfig", "", "kubeconfig path; in-cluster config when empty")
 	flag.StringVar(&o.sysRoot, "sys-root", envOr("SYS_ROOT", "/sys"), "sysfs mount to scan")
 	flag.StringVar(&o.cdiDir, "cdi-dir", envOr("CDI_DIR", "/var/run/cdi"), "directory for the CDI spec")
-	flag.StringVar(&o.attributesFile, "attributes-file", os.Getenv("ATTRIBUTES_FILE"), "comma-separated attribute files, in precedence order: the admin file first, then generated files")
+	flag.StringVar(&o.attributesFile, "attributes-file", os.Getenv("ATTRIBUTES_FILE"), "comma-separated attribute files, in precedence order: declared roles first, then detected ones")
 	flag.StringVar(&o.defaultBackend, "vfio-backend", envOr("VFIO_BACKEND", cdi.BackendLegacy), "VFIO backend when a claim does not choose one: legacy or iommufd")
 	flag.DurationVar(&o.interval, "rescan-interval", 30*time.Second, "how often to rescan sysfs and the attribute file")
 	flag.StringVar(&o.registrarDir, "registrar-dir", kubeletplugin.KubeletRegistryDir, "kubelet plugin registration directory")

@@ -28,6 +28,25 @@ type TestFunc struct {
 	SMLid     string // e.g. "0x1"
 	GID0      string // e.g. "fe80:0000:0000:0000:58a2:e103:0080:35a8"
 	Netdev    string // adds net/<Netdev>
+	VPD       []byte // contents of the vpd file
+}
+
+// VPD builds PCI VPD with an ID string, a read-only section holding the
+// serial and, when vendor is set, a V2 keyword with that value.
+func VPD(serial, vendor string) []byte {
+	ro := []byte("SN")
+	ro = append(ro, byte(len(serial)))
+	ro = append(ro, serial...)
+	if vendor != "" {
+		ro = append(ro, 'V', '2', byte(len(vendor)))
+		ro = append(ro, vendor...)
+	}
+	id := "ConnectX"
+	b := []byte{0x82, byte(len(id)), 0}
+	b = append(b, id...)
+	b = append(b, 0x90, byte(len(ro)), byte(len(ro)>>8))
+	b = append(b, ro...)
+	return append(b, 0x78)
 }
 
 // BuildTestTree lays out a minimal sysfs under root for tests: the device
@@ -97,6 +116,11 @@ func BuildTestTree(root string, funcs []TestFunc) error {
 				if err := os.WriteFile(filepath.Join(port, name), []byte(v+"\n"), 0o644); err != nil {
 					return err
 				}
+			}
+		}
+		if f.VPD != nil {
+			if err := os.WriteFile(filepath.Join(dev, "vpd"), f.VPD, 0o644); err != nil {
+				return err
 			}
 		}
 		if f.Netdev != "" {

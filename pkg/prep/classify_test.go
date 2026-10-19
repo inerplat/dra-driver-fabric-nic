@@ -39,7 +39,7 @@ func TestClassifyHGX(t *testing.T) {
 		"one subnet per rail":            {gpus: gpus[:3], ports: []PortFacts{port("c15", "pci0000:15", "0xa"), port("c37", "pci0000:37", "0xb"), port("c48", "pci0000:48", "0xc")}, result: Unmatched, reason: "one subnet per rail"},
 		"two GPUs on one root":           {gpus: []GPUInfo{gpu("g1", "pci0000:15"), gpu("g2", "pci0000:15"), gpu("g3", "pci0000:37")}, ports: []PortFacts{port("c15", "pci0000:15", "0xa"), port("c37", "pci0000:37", "0xa")}, result: Unmatched, reason: "has 2 GPUs"},
 		"compute port off the GPU roots": {gpus: gpus[:2], ports: []PortFacts{port("c15", "pci0000:15", "0xa"), port("c37", "pci0000:37", "0xa"), port("x", "pci0000:99", "0xa")}, result: Unmatched, reason: "outside every GPU root"},
-		"already on vfio":                {gpus: gpus, ports: h100, unprobed: []string{"c15"}, result: Unmatched, reason: "already bound"},
+		"already on vfio":                {gpus: gpus, ports: h100, unprobed: []string{"c15"}, result: Unmatched, reason: "cannot be probed"},
 		"no GPUs":                        {ports: h100, result: Unmatched},
 	} {
 		t.Run(name, func(t *testing.T) {

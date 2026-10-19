@@ -1,6 +1,8 @@
 package sysfs
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -48,26 +50,59 @@ func OtherMembers(members []Member, bdf string) []string {
 	return out
 }
 
-// VFIOIBFunctions lists every InfiniBand PF bound to a VFIO driver, with no
-// filtering, so that prep can tell which ports it cannot probe.
-func VFIOIBFunctions(root string) ([]string, error) {
+// NetworkPF is a network-class physical function, on any driver or none.
+type NetworkPF struct {
+	BDF        string
+	Vendor     string
+	Class      uint32
+	Driver     string
+	IOMMUGroup string
+	NumVFs     int
+	IBDev      string
+	Netdevs    []string
+}
+
+// NetworkPFs lists every network-class PF under root, of any vendor and
+// whatever it is bound to, so that nothing prep cannot probe goes unseen. A
+// device it cannot read is an error, not a gap.
+func NetworkPFs(root string) ([]NetworkPF, error) {
 	devDir := filepath.Join(root, "bus", "pci", "devices")
 	entries, err := os.ReadDir(devDir)
 	if err != nil {
 		return nil, err
 	}
-	var out []string
+	var out []NetworkPF
 	for _, e := range entries {
 		dir := filepath.Join(devDir, e.Name())
 		class, err := readHex(filepath.Join(dir, "class"))
-		if err != nil || class>>8 != 0x0207 || linkBase(filepath.Join(dir, "physfn")) != "" {
+		if err != nil {
+			return nil, fmt.Errorf("%s: read class: %w", e.Name(), err)
+		}
+		if class>>16 != 0x02 || linkBase(filepath.Join(dir, "physfn")) != "" {
 			continue
 		}
-		if IsVFIODriver(linkBase(filepath.Join(dir, "driver"))) {
-			out = append(out, e.Name())
+		vendor, err := readID(filepath.Join(dir, "vendor"))
+		if err != nil {
+			return nil, fmt.Errorf("%s: read vendor: %w", e.Name(), err)
 		}
+		p := NetworkPF{BDF: e.Name(), Vendor: vendor, Class: uint32(class), Driver: linkBase(filepath.Join(dir, "driver")), IOMMUGroup: linkBase(filepath.Join(dir, "iommu_group"))}
+		switch n, err := readInt(filepath.Join(dir, "sriov_numvfs")); {
+		case err == nil:
+			p.NumVFs = n
+		case !errors.Is(err, os.ErrNotExist):
+			return nil, fmt.Errorf("%s: read sriov_numvfs: %w", e.Name(), err)
+		}
+		if ibdevs, err := os.ReadDir(filepath.Join(dir, "infiniband")); err == nil && len(ibdevs) > 0 {
+			p.IBDev = ibdevs[0].Name()
+		}
+		if nets, err := os.ReadDir(filepath.Join(dir, "net")); err == nil {
+			for _, n := range nets {
+				p.Netdevs = append(p.Netdevs, n.Name())
+			}
+		}
+		out = append(out, p)
 	}
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool { return out[i].BDF < out[j].BDF })
 	return out, nil
 }
 

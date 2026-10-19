@@ -8,9 +8,10 @@ import (
 	"github.com/inerplat/dra-driver-fabric-nic/pkg/sysfs"
 )
 
-// Binder moves a PCI function to vfio-pci.
+// Binder moves a PCI function to vfio-pci. It calls verify right before it
+// detaches the function and binds nothing when verify fails.
 type Binder interface {
-	BindVFIO(bdf string) error
+	BindVFIO(bdf string, verify func() error) error
 }
 
 // SysfsBinder binds through driver_override, which survives the unbind, then
@@ -19,9 +20,12 @@ type SysfsBinder struct {
 	SysRoot string
 }
 
-func (b SysfsBinder) BindVFIO(bdf string) error {
+func (b SysfsBinder) BindVFIO(bdf string, verify func() error) error {
 	if _, err := os.Stat(filepath.Join(b.SysRoot, "bus", "pci", "drivers", "vfio-pci")); err != nil {
 		return fmt.Errorf("vfio-pci driver is not loaded: %w", err)
+	}
+	if err := verify(); err != nil {
+		return err
 	}
 	dev := filepath.Join(b.SysRoot, "bus", "pci", "devices", bdf)
 	if err := os.WriteFile(filepath.Join(dev, "driver_override"), []byte("vfio-pci"), 0o200); err != nil {

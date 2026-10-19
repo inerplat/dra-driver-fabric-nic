@@ -1,0 +1,70 @@
+# Rejects a malformed mode label or port annotation when it is written, and
+# keeps kubelets from setting or changing them, at registration too. Only
+# keys a request adds or changes are checked, so an old bad value never
+# blocks unrelated updates of the node; fabric-nic-prep refuses to bind on
+# such a node anyway.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: fabric-nic-node-keys
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - nodes
+  variables:
+  - name: prefix
+    expression: "'fabric-nic.inerplat.github.io/'"
+  - name: labels
+    expression: object.metadata.?labels.orValue({})
+  - name: annotations
+    expression: object.metadata.?annotations.orValue({})
+  - name: oldLabels
+    expression: "oldObject == null ? {} : oldObject.metadata.?labels.orValue({})"
+  - name: oldAnnotations
+    expression: "oldObject == null ? {} : oldObject.metadata.?annotations.orValue({})"
+  - name: changedLabels
+    expression: >-
+      variables.labels.filter(k, k.startsWith(variables.prefix) &&
+      !(k in variables.oldLabels && variables.oldLabels[k] == variables.labels[k]))
+  - name: changedAnnotations
+    expression: >-
+      variables.annotations.filter(k, k.startsWith(variables.prefix) &&
+      !(k in variables.oldAnnotations && variables.oldAnnotations[k] == variables.annotations[k]))
+  - name: removed
+    expression: >-
+      variables.oldLabels.exists(k, k.startsWith(variables.prefix) && k != variables.prefix + 'enabled' && !(k in variables.labels)) ||
+      variables.oldAnnotations.exists(k, k.startsWith(variables.prefix) && !(k in variables.annotations))
+  validations:
+  - expression: >-
+      variables.changedLabels.all(k,
+      k == variables.prefix + 'enabled' ||
+      (k == variables.prefix + 'mode' && variables.labels[k] in ['auto', 'explicit', 'report', 'off']))
+    message: the only labels under fabric-nic.inerplat.github.io/ are enabled and mode, and mode is auto, explicit, report or off
+  - expression: >-
+      variables.changedAnnotations.all(k,
+      k.matches('^fabric-nic\\.inerplat\\.github\\.io/port\\.[A-Za-z0-9]{1,48}-f[0-7]$') &&
+      variables.annotations[k].matches('^(compute|storage|other)/(vfio-pci|keep)$'))
+    message: annotations under fabric-nic.inerplat.github.io/ are port.<serial>-f<function> with a value <compute|storage|other>/<vfio-pci|keep>
+  - expression: >-
+      !request.userInfo.username.startsWith('system:node:') ||
+      (variables.changedLabels.all(k, k == variables.prefix + 'enabled') &&
+      size(variables.changedAnnotations) == 0 && !variables.removed)
+    message: kubelets may set fabric-nic.inerplat.github.io/enabled but no other fabric-nic.inerplat.github.io/ label or annotation
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: fabric-nic-node-keys
+spec:
+  policyName: fabric-nic-node-keys
+  validationActions:
+  - Deny

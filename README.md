@@ -23,7 +23,7 @@ Attributes without a domain are in the driver's domain, `fabric-nic.inerplat.git
 
 ## Attributes from files
 
-Anything the driver cannot see in sysfs, such as which fabric a port reaches, comes from the files in `--attributes-file`, a comma-separated list. The first is the admin file, written by a person. Later files are generated, for example by `fabric-nic-prep`.
+Anything the driver cannot see in sysfs, such as which fabric a port reaches, comes from the files in `--attributes-file`, a comma-separated list. The first holds roles a person declared, the later ones roles a tool detected. `fabric-nic-prep` writes both kinds from the node's port annotations and its own detection; another tool or a person can write them instead.
 
 ```json
 {
@@ -40,13 +40,13 @@ Anything the driver cannot see in sysfs, such as which fabric a port reaches, co
 ```
 
 - Every attribute needs a domain. The driver's domain and `resource.kubernetes.io` are refused.
-- When `bootID` is set and differs from `/proc/sys/kernel/random/boot_id`, the whole file is ignored, so attributes written before a reboot are never published. A generated file must carry a `bootID`. An admin file should leave it out: what a person writes, such as which fabric a port reaches, holds across reboots, and an admin file with a stale `bootID` is unusable, which also stops `fabric-nic-prep` from binding.
+- When `bootID` is set and differs from `/proc/sys/kernel/random/boot_id`, the whole file is ignored, so attributes written before a reboot are never published. Every file after the first must carry a `bootID`. `fabric-nic-prep` writes a `bootID` into both.
 - An earlier file wins for a whole device: once a file names a device, later files are not read for it.
-- `roleSource` is `file` for a device the admin file names, `auto` for one only a generated file names, and `none` otherwise.
+- `roleSource` is `file` for a device the first file names, `auto` for one only a later file names, and `none` otherwise.
 - Attribute names and values must pass the ResourceSlice rules (a DNS subdomain, a C identifier of at most 32 characters, strings of at most 64 bytes, semantic versions); a file with one bad entry is rejected as a whole.
 - The driver rereads the files and sysfs every `--rescan-interval` (30s) and republishes on a change. A file that fails to load is skipped as a whole and logged.
 
-`deploy/deviceclasses.yaml` ships two kinds of compute class. `ib-pf-compute` and `ib-pf-compute-guest` accept only `roleSource == 'file'`. `ib-pf-compute-auto` and `ib-pf-compute-auto-guest` also accept `auto`, a role that `fabric-nic-prep` inferred and that can be wrong.
+`deploy/deviceclasses.yaml` ships two kinds of compute class. `ib-pf-compute` and `ib-pf-compute-guest` accept only `roleSource == 'file'`. `ib-pf-compute-auto` and `ib-pf-compute-auto-guest` also accept `auto`, a role that `fabric-nic-prep` detected and that can be wrong.
 
 ## VFIO backends
 
@@ -83,73 +83,77 @@ Prepare writes no files of its own. It returns the CDI device and KEP-5304 devic
 
 ## fabric-nic-prep
 
-`fabric-nic-prep` is an optional, privileged node component, deployed from `deploy/prep.yaml` as its own DaemonSet. It reads fabric facts from InfiniBand ports while they are still on their host driver, infers which ports belong to the compute fabric, writes that as a generated attribute file, and at the bind level hands those ports to vfio-pci. The plugin does not know it exists: it only reads the files.
+`fabric-nic-prep` is an init container of the plugin pod. It runs once per pod start, decides the role of every Mellanox network PF on the node, binds the ones meant for vfio-pci, writes the plugin's attribute files and `report.json` under `/var/lib/fabric-nic`, prints a table of what it saw, and exits. It reads the Node but never writes it.
 
-The node label `fabric-nic.inerplat.github.io/prep` selects what prep does on a node:
+The init container is privileged. The pod keeps its own network and PID namespaces: prep reads the Node from the pod, then runs the rest of itself in the host's network namespace through `nsenter`, and reads the host's processes through the host's `/proc`, mounted at `/host/proc` beside the host's `/sys` at `/host/sys`. A PID namespace cannot be entered from inside a child of it, so prep does not try. Before binding it checks that it sees the host (it is in the network namespace of the host's PID 1, `/host/proc` shows it, and netlink and sysfs list the same interfaces); when the check fails it binds nothing.
 
-| Label | Prep |
-|---|---|
-| absent or `disabled` | not scheduled |
-| `report` | classifies and writes `report.json` and `attributes.proposed.json`, which the plugin does not read; binds nothing |
-| `bind` | classifies; on a match writes `attributes.generated.json` and binds the eligible compute ports to vfio-pci |
+### Ports
 
-Changing `bind` to `report` or `disabled` stops new binds. Prep never moves anything off vfio-pci, so ports it bound stay there until a reboot or until an operator returns them.
+A port is identified by its VPD serial number and PCI function, `<serial>-f<function>`, which follow the card rather than the slot. A function whose VPD cannot be read, has no usable serial, or shares its ID with another function has no ID and gets no role. A card whose VPD carries `SW_MNG` is a ConnectX bridge that manages NVLink switches; NVIDIA's Fabric Manager start script uses the same marker.
 
-### Inferred roles can be wrong
+### Node keys
 
-Prep recognises one topology, an HGX-style board, and only marks ports `example.com/fabric=compute`. It needs all of:
+| Key | Kind | Meaning | Values |
+|---|---|---|---|
+| `fabric-nic.inerplat.github.io/mode` | label | what prep does on the node | `auto`, `explicit`, `report`, `off`; without the label, `DEFAULT_MODE` of the DaemonSet (`report`) |
+| `fabric-nic.inerplat.github.io/port.<serial>-f<function>` | annotation, one per port | a declared role and whether prep binds the port | `<compute\|storage\|other>/<vfio-pci\|keep>` |
 
-1. Every InfiniBand port on the node is Active, has a subnet prefix, and answered the subnet manager query. A port anywhere with unknown facts might belong to the GPU fabric, so the pass is incomplete. A function with more than one port is not classified at all.
-2. Exactly one fabric, identified by subnet prefix and master SM GUID, gives every GPU root exactly one port.
-3. That fabric has no port outside a GPU root, and every GPU root holds one GPU.
+`vfio-pci` binds the port at every pod start; the binding does not survive a reboot, so prep binds again after one. `keep` leaves the port on whatever driver it has, which is the value for a port someone else has pinned to vfio-pci. Prep never moves a port off vfio-pci.
 
-A GPU is a 3D controller (class 0x0302), or a display-class device from a vendor in `--gpu-vendors` (default `10de`). Other display devices, such as a BMC's VGA, are listed in the report as excluded.
+| Mode | Declared ports | Other ports | Binds |
+|---|---|---|---|
+| `auto` | as declared (`roleSource=file`) | detected compute ports (`roleSource=auto`) | yes |
+| `explicit` | as declared | left alone and given no role | yes |
+| `report` | previewed | detection previewed | no |
+| `off` | not read | not read | no |
 
-The facts are read twice per pass, so a subnet manager failover during the pass makes it incomplete rather than wrong. An incomplete pass (a port down, a query refused, a change during the pass) is retried with backoff up to `--retry-max`. An unmatched one is retried only when prep restarts. A match is kept for the rest of the boot.
+A declared role is published even when the port cannot be bound, unless the hardware rules it out: an NVLink management bridge can only be `other`, and a `compute` port must share a PCIe root with a GPU. A mode value outside the list, or a malformed port annotation on an `auto` or `explicit` node, makes prep bind nothing and publish no roles until it is fixed. An annotation naming a port the node does not have is reported as stale. `deploy/validation.yaml` rejects malformed keys and values when they are written, and keeps kubelets from setting any of them except `enabled`.
 
-Prep refuses, with the failing clause in the report, on boards it does not recognise:
-- a NIC shared by two GPUs, or several GPUs under one root;
-- GPUs attached to the CPU over a coherent link rather than PCIe, with no NIC on their root;
-- fewer NICs than GPUs;
-- one subnet per rail;
-- a fabric whose subnet manager refuses queries from hosts;
-- a node that binds its NICs to vfio-pci before prep runs.
+Changes take effect at the next pod start: delete the node's plugin pod after changing the label or annotations.
 
-It also cannot tell a converged compute and storage fabric from a compute fabric, so do not run the bind level there. Storage and every other role come only from the admin file. Prep publishes no rail, switch or fabric identity.
+### Declaring ports
+
+Run the node in `report` mode and read the init container's log, `kubectl -n fabric-nic logs <pod> -c prep`. It shows one row per port (ID, PCI address, driver, PCIe root, the GPU on that root, the NVLink management marker, fabric, role, result) and the commands that declare what it saw: values it detected are filled in, the rest are listed as comments to fill in. Review the values, run the commands, and delete the pod. `report.json` holds the same and every fact behind it.
+
+### Detection
+
+In `auto` mode prep detects the compute ports at the first pod start of every boot, since the hardware may have changed while the node was down, and keeps the match for the rest of the boot. It recognises one topology, an HGX-style board:
+
+1. NVLink management bridges are left out.
+2. Every other InfiniBand port is Active, has a subnet prefix and answered the subnet manager query, and every function has an ID and a known PCIe root. Otherwise the detection is incomplete.
+3. Every other InfiniBand PF was probed on its host driver, unless prep bound it in this boot: the fabric of any other port is unknown.
+4. Exactly one fabric, identified by subnet prefix and master SM GUID, gives every GPU root exactly one port; that fabric has no port outside a GPU root; every GPU root holds one GPU.
+
+The facts are read twice, so a subnet manager failover during the run makes it incomplete rather than wrong. An incomplete detection within `--deadline` (10 minutes) of boot makes prep exit 1, so the kubelet runs it again; after that prep lets the plugin start without detected roles. A GPU is a 3D controller (class 0x0302), or a display-class device from a vendor in `--gpu-vendors` (default `10de`).
+
+Detected roles can be wrong. A match proves the shape of the fabric, not its purpose: when the real compute ports are missing or invisible and another fabric happens to give every GPU root one port, prep binds that fabric's ports. Host use the checks below cannot see, such as a kernel RDMA consumer with no file descriptor or address, or one that starts after prep, is not caught either. Use `report` mode on a new kind of node before `auto`, and the strict DeviceClasses where a wrong NIC matters. Every other unrecognised shape binds nothing, with the reason in the report: a NIC shared by two GPUs or several GPUs under one root, fewer NICs than GPUs, two NICs per GPU root, one subnet per rail, a subnet manager that refuses host queries, an unmarked NVLink bridge that does not answer, ports pinned to vfio-pci before prep ran.
 
 ### Binding
 
-At the bind level prep moves a compute port to vfio-pci only when all of these hold:
-- the generated file naming it is in place;
-- the admin file gives it no other role;
-- the port has no VFs;
-- prep has not bound it before in this boot;
-- its IOMMU group holds nothing else but bridges;
-- the host does not use it, checked again right before the bind.
+Prep binds a port to vfio-pci only when all of these hold:
+- it is declared, or detected, with `vfio-pci`, and has an ID;
+- it is not an NVLink management bridge;
+- a `compute` port shares a PCIe root with a GPU;
+- the port has no VFs, and its IOMMU group holds nothing else but bridges;
+- prep has not bound it before in this boot; one an operator returned to its host driver is left there for the rest of the boot;
+- its driver shows an RDMA device (InfiniBand) or a network interface (Ethernet) in the host's namespaces, since one moved to another namespace cannot be checked;
+- the host does not use it, checked again right before the bind, and the card in the slot is still the declared one, checked by its VPD right before it is detached.
 
-The host uses a port when it, or anything stacked on it (P_Key and VLAN children, bonds and bridges, found through the kernel's links rather than names), has an address other than link-local, is a bond or bridge member, carries an IPv4 or IPv6 default route, or is used by LNet. It also counts as used when a process holds a queue pair on the device or holds one of its umad, issm or uverbs character devices, compared by device number. A check that cannot run counts as use. An admin file that exists but does not load stops all binding until it is fixed.
+The host uses a port when it, or anything stacked on it (P_Key and VLAN children, bonds and bridges, found through the kernel's links rather than names), has an address other than link-local, is a bond or bridge member, carries an IPv4 or IPv6 default route, or is used by LNet (the host's `lnetctl`, run in the host's root). It also counts as used when a process holds one of the device's umad, issm or uverbs character devices, compared by device number, which every user queue pair needs; when prep runs in the host's PID namespace it also asks the kernel for queue pairs owned by processes. A check that cannot run counts as use.
 
-To undo or prevent a bind without a reboot:
-- Return the port to its host driver by hand; prep records it as `returned-by-operator` and leaves it for the rest of the boot.
-- Set `example.com/fabric` to `host` for it in the admin file; this lasts across reboots.
-- Remove the node label.
+### Upgrading from the prep DaemonSet
 
-### Static setup with prep's help
-
-On a node prep cannot classify, or where you would rather decide by hand, run prep at the `report` level, read `report.json` (ports, subnet prefixes, SM GUIDs, neighbor switches, GPU roots), and write the admin file yourself, starting from `attributes.proposed.json` when there is one. Bind the ports with the OS, for example `driverctl set-override <bdf> vfio-pci`.
-
-## Deploy
+Earlier versions ran prep as its own DaemonSet with a `prep=report|bind` node label and read a hand-written `attributes.json`. Removing that manifest from the repository does not remove the objects, and the old DaemonSet would race the init container over the same files. Before applying the new `deploy/daemonset.yaml`:
 
 ```bash
-kubectl apply -f deploy/rbac.yaml -f deploy/deviceclasses.yaml
-kubectl label node <node> fabric-nic.inerplat.github.io/enabled=true
-kubectl apply -f deploy/daemonset.yaml
-# optional
-kubectl apply -f deploy/prep.yaml
-kubectl label node <node> fabric-nic.inerplat.github.io/prep=report
+kubectl -n fabric-nic delete daemonset fabric-nic-prep
+kubectl -n fabric-nic delete serviceaccount fabric-nic-prep
+kubectl delete clusterrolebinding fabric-nic-prep
+kubectl delete clusterrole fabric-nic-prep
+kubectl label nodes --all fabric-nic.inerplat.github.io/prep-
 ```
 
-The plugin DaemonSet needs the kubelet plugin directories, `/var/run/cdi` and the attribute file directory `/var/lib/fabric-nic`, and reads `/sys` and `/proc` as the container sees them. It is not privileged; it runs as root for its writes to the host paths. Prep is privileged and runs in the host network and PID namespaces; its image needs `sminfo` and `smpquery` (infiniband-diags) and `rdma` (iproute2).
+prep now owns `attributes.json` and rewrites it at every pod start. Carry its entries over as port annotations: start the node in `report` mode and use the IDs from the log.
 
 ## License
 

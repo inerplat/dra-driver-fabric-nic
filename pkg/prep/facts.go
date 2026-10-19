@@ -93,15 +93,16 @@ func (d DiagsProber) run(ctx context.Context, name string, args ...string) (stri
 }
 
 // readFacts reads one pass of facts for every InfiniBand function on its host
-// driver. VFs inherit their PF's fabric and are not probed.
-func readFacts(ctx context.Context, sysRoot string, prober Prober) ([]PortFacts, error) {
+// driver, except those in skip. VFs inherit their PF's fabric and are not
+// probed.
+func readFacts(ctx context.Context, sysRoot string, prober Prober, skip map[string]bool) ([]PortFacts, error) {
 	ports, err := sysfs.HostIBPorts(sysRoot)
 	if err != nil {
 		return nil, err
 	}
 	var out []PortFacts
 	for _, p := range ports {
-		if p.VF {
+		if p.VF || skip[p.BDF] {
 			continue
 		}
 		f := PortFacts{
@@ -153,25 +154,4 @@ func gpuInfo(sysRoot string, vendors []string) ([]GPUInfo, []string, error) {
 		out = append(out, GPUInfo{BDF: g.BDF, Root: pcieRoot(sysRoot, g.BDF)})
 	}
 	return out, excluded, nil
-}
-
-// unprobedOnGPURoots lists InfiniBand PFs under a GPU root that are already
-// on a VFIO driver and are not in skip. The list is not filtered by the
-// plugin's publishing rules: any such port has an unknown fabric.
-func unprobedOnGPURoots(sysRoot string, gpus []GPUInfo, skip map[string]bool) ([]string, error) {
-	bdfs, err := sysfs.VFIOIBFunctions(sysRoot)
-	if err != nil {
-		return nil, err
-	}
-	roots := map[string]bool{}
-	for _, g := range gpus {
-		roots[g.Root] = true
-	}
-	var out []string
-	for _, bdf := range bdfs {
-		if !skip[bdf] && roots[pcieRoot(sysRoot, bdf)] {
-			out = append(out, bdf)
-		}
-	}
-	return out, nil
 }

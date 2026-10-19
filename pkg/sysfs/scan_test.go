@@ -160,7 +160,7 @@ func TestScanRefusesGroupWithAGPU(t *testing.T) {
 	if funcs, _, _ := Scan(root); len(funcs) != 0 {
 		t.Errorf("NIC sharing a group with a GPU was published: %+v", funcs)
 	}
-	if all, _ := VFIOIBFunctions(root); len(all) != 1 {
-		t.Errorf("unfiltered list %v", all)
+	if all, _ := NetworkPFs(root); len(all) != 1 || all[0].Driver != "vfio-pci" {
+		t.Errorf("unfiltered list %+v", all)
 	}
 }

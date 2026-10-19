@@ -8,7 +8,7 @@ spec:
   - cel:
       expression: device.driver == 'fabric-nic.inerplat.github.io'
 ---
-# Whole InfiniBand PFs that the admin attribute file names as compute fabric.
+# Whole InfiniBand PFs declared as compute fabric (the first attribute file).
 # A function the file does not name never matches.
 apiVersion: resource.k8s.io/v1
 kind: DeviceClass

@@ -23,11 +23,14 @@ type HostUse interface {
 }
 
 // SystemHostUse checks the host through sysfs, procfs, netlink and the rdma
-// and lnetctl tools. It needs the host's network and PID namespaces.
+// and lnetctl tools. It needs the host's network namespace and the host's
+// procfs at ProcRoot.
 type SystemHostUse struct {
 	SysRoot  string
 	ProcRoot string
 	SelfPID  int
+	// LnetCmd runs the host's lnetctl, which the prep image does not carry.
+	LnetCmd []string
 }
 
 func (h SystemHostUse) InUse(ctx context.Context, p PortFacts) (bool, string) {
@@ -44,8 +47,13 @@ func (h SystemHostUse) InUse(ctx context.Context, p PortFacts) (bool, string) {
 		return true, why
 	}
 	if p.IBDev != "" {
-		if used, why := rdmaUserQPs(ctx, p.IBDev); used {
-			return true, why
+		// The kernel lists only queue pairs of processes in the caller's PID
+		// namespace or below it. Outside the host's, the scan of open uverbs
+		// files below covers user queue pairs, which need one.
+		if h.inHostPIDNamespace() {
+			if used, why := rdmaUserQPs(ctx, p.IBDev); used {
+				return true, why
+			}
 		}
 		if used, why := h.openRDMANodes(p.IBDev); used {
 			return true, why
@@ -188,7 +196,11 @@ func (h SystemHostUse) lnetInUse(ctx context.Context, netdevs []string) (bool, s
 	if _, err := os.Stat(filepath.Join(h.SysRoot, "module", "lnet")); err != nil {
 		return false, ""
 	}
-	out, err := exec.CommandContext(ctx, "lnetctl", "net", "show").CombinedOutput()
+	cmd := append(append([]string{}, h.LnetCmd...), "net", "show")
+	if len(h.LnetCmd) == 0 {
+		cmd = []string{"lnetctl", "net", "show"}
+	}
+	out, err := exec.CommandContext(ctx, cmd[0], cmd[1:]...).CombinedOutput()
 	if err != nil {
 		return true, fmt.Sprintf("lnet is loaded and lnetctl failed: %v", err)
 	}
@@ -297,4 +309,57 @@ func (h SystemHostUse) openRDMANodes(ibdev string) (bool, string) {
 		}
 	}
 	return false, ""
+}
+
+func (h SystemHostUse) inHostPIDNamespace() bool {
+	self, err1 := os.Readlink("/proc/self/ns/pid")
+	host, err2 := os.Readlink(filepath.Join(h.ProcRoot, "1", "ns", "pid"))
+	return err1 == nil && err2 == nil && self == host
+}
+
+// HostView checks that this process sees the host: it is in the network
+// namespace of the host's PID 1, ProcRoot is a procfs that shows this
+// process (the host's, or an ancestor of its own), and netlink lists the
+// interfaces sysfs shows.
+func (h SystemHostUse) HostView() error {
+	self, err := os.Readlink("/proc/self/ns/net")
+	if err != nil {
+		return fmt.Errorf("read own network namespace: %w", err)
+	}
+	host, err := os.Readlink(filepath.Join(h.ProcRoot, "1", "ns", "net"))
+	if err != nil {
+		return fmt.Errorf("read the host's network namespace: %w", err)
+	}
+	if self != host {
+		return fmt.Errorf("running in network namespace %s, not the host's %s", self, host)
+	}
+	if _, err := os.Readlink(filepath.Join(h.ProcRoot, "self")); err != nil {
+		return fmt.Errorf("%s does not show this process, so it cannot be the host's procfs: %w", h.ProcRoot, err)
+	}
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return fmt.Errorf("list interfaces: %w", err)
+	}
+	seen := map[string]bool{}
+	for _, i := range ifaces {
+		seen[i.Name] = true
+	}
+	entries, err := os.ReadDir(filepath.Join(h.SysRoot, "class", "net"))
+	if err != nil {
+		return err
+	}
+	n := 0
+	for _, e := range entries {
+		if st, err := os.Stat(filepath.Join(h.SysRoot, "class", "net", e.Name())); err != nil || !st.IsDir() {
+			continue
+		}
+		n++
+		if !seen[e.Name()] {
+			return fmt.Errorf("sysfs shows interface %s that netlink does not; prep is not in the host's network namespace", e.Name())
+		}
+	}
+	if n != len(seen) {
+		return fmt.Errorf("netlink lists %d interfaces and sysfs %d; prep is not in the host's network namespace", len(seen), n)
+	}
+	return nil
 }
