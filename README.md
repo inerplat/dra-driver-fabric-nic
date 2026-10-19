@@ -150,3 +150,7 @@ kubectl label node <node> fabric-nic.inerplat.github.io/prep=report
 ```
 
 The plugin DaemonSet needs the kubelet plugin directories, `/var/run/cdi` and the attribute file directory `/var/lib/fabric-nic`, and reads `/sys` and `/proc` as the container sees them. It is not privileged; it runs as root for its writes to the host paths. Prep is privileged and runs in the host network and PID namespaces; its image needs `sminfo` and `smpquery` (infiniband-diags) and `rdma` (iproute2).
+
+## License
+
+Copyright The fabric-nic Authors. Licensed under the Apache License, Version 2.0; see [LICENSE](LICENSE).
