@@ -9,11 +9,11 @@ import (
 	resourceapi "k8s.io/api/resource/v1"
 	"k8s.io/dynamic-resource-allocation/deviceattribute"
 
-	"github.com/inerplat/dra-driver-vfio-nic/internal/sysfstest"
-	"github.com/inerplat/dra-driver-vfio-nic/pkg/sysfs"
+	"github.com/inerplat/dra-driver-fabric-nic/internal/sysfstest"
+	"github.com/inerplat/dra-driver-fabric-nic/pkg/sysfs"
 )
 
-const driver = "vfio-nic.example.com"
+const driver = "fabric-nic.example.com"
 
 func TestBuild(t *testing.T) {
 	root := t.TempDir()
@@ -103,7 +103,7 @@ func TestLoadExtra(t *testing.T) {
 	for name, body := range map[string]string{
 		"version":       `{"version":"v2","devices":{}}`,
 		"no domain":     `{"version":"v1","devices":{"0000:9c:00.0":{"fabric":{"string":"x"}}}}`,
-		"driver domain": `{"version":"v1","devices":{"0000:9c:00.0":{"vfio-nic.example.com/function":{"string":"x"}}}}`,
+		"driver domain": `{"version":"v1","devices":{"0000:9c:00.0":{"fabric-nic.example.com/function":{"string":"x"}}}}`,
 		"standard":      `{"version":"v1","devices":{"0000:9c:00.0":{"resource.kubernetes.io/pcieRoot":{"string":"x"}}}}`,
 		"two values":    `{"version":"v1","devices":{"0000:9c:00.0":{"example.com/a":{"string":"x","int":1}}}}`,
 		"no value":      `{"version":"v1","devices":{"0000:9c:00.0":{"example.com/a":{}}}}`,

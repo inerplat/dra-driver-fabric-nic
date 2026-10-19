@@ -1,4 +1,4 @@
-module github.com/inerplat/dra-driver-vfio-nic
+module github.com/inerplat/dra-driver-fabric-nic
 
 go 1.26.9
 

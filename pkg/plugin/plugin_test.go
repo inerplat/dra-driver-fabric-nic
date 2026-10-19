@@ -13,12 +13,12 @@ import (
 	"k8s.io/dynamic-resource-allocation/deviceattribute"
 	specs "tags.cncf.io/container-device-interface/specs-go"
 
-	"github.com/inerplat/dra-driver-vfio-nic/pkg/cdi"
-	"github.com/inerplat/dra-driver-vfio-nic/pkg/inventory"
-	"github.com/inerplat/dra-driver-vfio-nic/pkg/sysfs"
+	"github.com/inerplat/dra-driver-fabric-nic/pkg/cdi"
+	"github.com/inerplat/dra-driver-fabric-nic/pkg/inventory"
+	"github.com/inerplat/dra-driver-fabric-nic/pkg/sysfs"
 )
 
-const driver = "vfio-nic.example.com"
+const driver = "fabric-nic.example.com"
 
 func newPlugin(t *testing.T) *Plugin {
 	t.Helper()

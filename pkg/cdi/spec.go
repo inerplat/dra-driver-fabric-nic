@@ -10,7 +10,7 @@ import (
 
 	specs "tags.cncf.io/container-device-interface/specs-go"
 
-	"github.com/inerplat/dra-driver-vfio-nic/pkg/inventory"
+	"github.com/inerplat/dra-driver-fabric-nic/pkg/inventory"
 )
 
 // VFIO backends a device can be exposed with. A container runtime picks
@@ -45,7 +45,7 @@ const (
 // Writer writes one spec file for the whole node.
 type Writer struct {
 	Dir  string // e.g. /var/run/cdi
-	Kind string // vendor/class, e.g. vfio-nic.inerplat.github.io/nic
+	Kind string // vendor/class, e.g. fabric-nic.inerplat.github.io/nic
 }
 
 // DeviceID returns the qualified CDI name of a device with a backend.

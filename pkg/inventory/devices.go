@@ -8,7 +8,7 @@ import (
 	"k8s.io/dynamic-resource-allocation/deviceattribute"
 	"k8s.io/utils/ptr"
 
-	"github.com/inerplat/dra-driver-vfio-nic/pkg/sysfs"
+	"github.com/inerplat/dra-driver-fabric-nic/pkg/sysfs"
 )
 
 // Attribute names. Names without a domain belong to the driver's domain.

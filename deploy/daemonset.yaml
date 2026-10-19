@@ -1,29 +1,29 @@
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: vfio-nic-plugin
-  namespace: vfio-nic
+  name: fabric-nic-plugin
+  namespace: fabric-nic
 spec:
   selector:
     matchLabels:
-      app: vfio-nic-plugin
+      app: fabric-nic-plugin
   template:
     metadata:
       labels:
-        app: vfio-nic-plugin
+        app: fabric-nic-plugin
     spec:
-      serviceAccountName: vfio-nic-plugin
+      serviceAccountName: fabric-nic-plugin
       priorityClassName: system-node-critical
       # Select the nodes that hand NICs to VMs.
       nodeSelector:
-        vfio-nic.inerplat.github.io/enabled: "true"
+        fabric-nic.inerplat.github.io/enabled: "true"
       tolerations:
       - operator: Exists
       containers:
       - name: plugin
-        image: vfio-nic-plugin:dev
+        image: fabric-nic-plugin:dev
         args:
-        - --attributes-file=/var/lib/vfio-nic/attributes.json
+        - --attributes-file=/var/lib/fabric-nic/attributes.json
         env:
         - name: NODE_NAME
           valueFrom:
@@ -45,7 +45,7 @@ spec:
         - name: cdi
           mountPath: /var/run/cdi
         - name: attributes
-          mountPath: /var/lib/vfio-nic
+          mountPath: /var/lib/fabric-nic
           readOnly: true
       volumes:
       - name: plugins-registry
@@ -60,5 +60,5 @@ spec:
           type: DirectoryOrCreate
       - name: attributes
         hostPath:
-          path: /var/lib/vfio-nic
+          path: /var/lib/fabric-nic
           type: DirectoryOrCreate

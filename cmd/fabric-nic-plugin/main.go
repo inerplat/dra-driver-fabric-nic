@@ -1,4 +1,4 @@
-// Command vfio-nic-plugin publishes the network functions a node has bound to
+// Command fabric-nic-plugin publishes the network functions a node has bound to
 // vfio-pci as DRA devices, for runtimes that pass them to a VM.
 package main
 
@@ -27,10 +27,10 @@ import (
 
 	resourceapi "k8s.io/api/resource/v1"
 
-	"github.com/inerplat/dra-driver-vfio-nic/pkg/cdi"
-	"github.com/inerplat/dra-driver-vfio-nic/pkg/inventory"
-	"github.com/inerplat/dra-driver-vfio-nic/pkg/plugin"
-	"github.com/inerplat/dra-driver-vfio-nic/pkg/sysfs"
+	"github.com/inerplat/dra-driver-fabric-nic/pkg/cdi"
+	"github.com/inerplat/dra-driver-fabric-nic/pkg/inventory"
+	"github.com/inerplat/dra-driver-fabric-nic/pkg/plugin"
+	"github.com/inerplat/dra-driver-fabric-nic/pkg/sysfs"
 )
 
 type options struct {
@@ -49,7 +49,7 @@ type options struct {
 func main() {
 	klog.InitFlags(nil)
 	var o options
-	flag.StringVar(&o.driverName, "driver-name", envOr("DRIVER_NAME", "vfio-nic.inerplat.github.io"), "DRA driver name, also the attribute domain")
+	flag.StringVar(&o.driverName, "driver-name", envOr("DRIVER_NAME", "fabric-nic.inerplat.github.io"), "DRA driver name, also the attribute domain")
 	flag.StringVar(&o.nodeName, "node-name", os.Getenv("NODE_NAME"), "name of this node")
 	flag.StringVar(&o.kubeconfig, "kubeconfig", "", "kubeconfig path; in-cluster config when empty")
 	flag.StringVar(&o.sysRoot, "sys-root", envOr("SYS_ROOT", "/sys"), "sysfs mount to scan")

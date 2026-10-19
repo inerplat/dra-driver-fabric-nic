@@ -1,4 +1,4 @@
-# dra-driver-vfio-nic
+# dra-driver-fabric-nic
 
 A DRA driver that publishes the network functions a node has bound to vfio-pci, for runtimes that pass them to a VM. It only publishes and names devices: it does not create VFs, bind drivers or decide what a function is for.
 
@@ -18,7 +18,7 @@ One device per PCI function whose class is a network controller and whose driver
 | `resource.kubernetes.io/pcieRoot` | PCIe root complex |
 | `resource.kubernetes.io/numaNode` | NUMA node, when the platform reports one |
 
-Attributes without a domain are in the driver's domain, `vfio-nic.inerplat.github.io`.
+Attributes without a domain are in the driver's domain, `fabric-nic.inerplat.github.io`.
 
 ## Attributes from a file
 
@@ -42,7 +42,7 @@ Every attribute needs a domain, and the driver's domain and `resource.kubernetes
 
 ## VFIO backends
 
-The CDI spec (`/var/run/cdi/vfio-nic.inerplat.github.io_nic.json`) lists each device twice, once per backend:
+The CDI spec (`/var/run/cdi/fabric-nic.inerplat.github.io_nic.json`) lists each device twice, once per backend:
 
 | CDI device | Device nodes |
 |---|---|
@@ -56,9 +56,9 @@ config:
 - requests:
   - nic0
   opaque:
-    driver: vfio-nic.inerplat.github.io
+    driver: fabric-nic.inerplat.github.io
     parameters:
-      apiVersion: vfio-nic.inerplat.github.io/v1alpha1
+      apiVersion: fabric-nic.inerplat.github.io/v1alpha1
       kind: NicConfig
       vfioBackend: iommufd
 ```
@@ -77,8 +77,8 @@ Prepare writes no files of its own. It returns the CDI device and KEP-5304 devic
 
 ```bash
 kubectl apply -f deploy/rbac.yaml -f deploy/deviceclasses.yaml
-kubectl label node <node> vfio-nic.inerplat.github.io/enabled=true
+kubectl label node <node> fabric-nic.inerplat.github.io/enabled=true
 kubectl apply -f deploy/daemonset.yaml
 ```
 
-The DaemonSet needs the kubelet plugin directories, `/var/run/cdi` and the attribute file directory `/var/lib/vfio-nic`. It reads `/sys` and `/proc` as the container sees them.
+The DaemonSet needs the kubelet plugin directories, `/var/run/cdi` and the attribute file directory `/var/lib/fabric-nic`. It reads `/sys` and `/proc` as the container sees them.

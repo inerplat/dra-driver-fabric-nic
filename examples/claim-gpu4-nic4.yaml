@@ -30,22 +30,22 @@ spec:
           count: 1
       - name: nic0
         exactly:
-          deviceClassName: ib-pf-compute.vfio-nic.inerplat.github.io
+          deviceClassName: ib-pf-compute.fabric-nic.inerplat.github.io
           allocationMode: ExactCount
           count: 1
       - name: nic1
         exactly:
-          deviceClassName: ib-pf-compute.vfio-nic.inerplat.github.io
+          deviceClassName: ib-pf-compute.fabric-nic.inerplat.github.io
           allocationMode: ExactCount
           count: 1
       - name: nic2
         exactly:
-          deviceClassName: ib-pf-compute.vfio-nic.inerplat.github.io
+          deviceClassName: ib-pf-compute.fabric-nic.inerplat.github.io
           allocationMode: ExactCount
           count: 1
       - name: nic3
         exactly:
-          deviceClassName: ib-pf-compute.vfio-nic.inerplat.github.io
+          deviceClassName: ib-pf-compute.fabric-nic.inerplat.github.io
           allocationMode: ExactCount
           count: 1
       constraints:
@@ -78,8 +78,8 @@ spec:
         - nic2
         - nic3
         opaque:
-          driver: vfio-nic.inerplat.github.io
+          driver: fabric-nic.inerplat.github.io
           parameters:
-            apiVersion: vfio-nic.inerplat.github.io/v1alpha1
+            apiVersion: fabric-nic.inerplat.github.io/v1alpha1
             kind: NicConfig
             vfioBackend: legacy

@@ -1,18 +1,18 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: vfio-nic
+  name: fabric-nic
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: vfio-nic-plugin
-  namespace: vfio-nic
+  name: fabric-nic-plugin
+  namespace: fabric-nic
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: vfio-nic-plugin
+  name: fabric-nic-plugin
 rules:
 - apiGroups:
   - resource.k8s.io
@@ -42,12 +42,12 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: vfio-nic-plugin
+  name: fabric-nic-plugin
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: vfio-nic-plugin
+  name: fabric-nic-plugin
 subjects:
 - kind: ServiceAccount
-  name: vfio-nic-plugin
-  namespace: vfio-nic
+  name: fabric-nic-plugin
+  namespace: fabric-nic

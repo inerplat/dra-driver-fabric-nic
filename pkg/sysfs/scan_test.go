@@ -3,7 +3,7 @@ package sysfs
 import (
 	"testing"
 
-	"github.com/inerplat/dra-driver-vfio-nic/internal/sysfstest"
+	"github.com/inerplat/dra-driver-fabric-nic/internal/sysfstest"
 )
 
 func testTree(t *testing.T) string {

@@ -2,11 +2,11 @@
 apiVersion: resource.k8s.io/v1
 kind: DeviceClass
 metadata:
-  name: vfio-nic.inerplat.github.io
+  name: fabric-nic.inerplat.github.io
 spec:
   selectors:
   - cel:
-      expression: device.driver == 'vfio-nic.inerplat.github.io'
+      expression: device.driver == 'fabric-nic.inerplat.github.io'
 ---
 # Whole InfiniBand PFs that the attribute file names as compute fabric. A
 # function without the attribute never matches, so a node whose attribute
@@ -14,14 +14,14 @@ spec:
 apiVersion: resource.k8s.io/v1
 kind: DeviceClass
 metadata:
-  name: ib-pf-compute.vfio-nic.inerplat.github.io
+  name: ib-pf-compute.fabric-nic.inerplat.github.io
 spec:
   selectors:
   - cel:
       expression: >-
-        device.driver == 'vfio-nic.inerplat.github.io' &&
-        device.attributes['vfio-nic.inerplat.github.io'].function == 'pf' &&
-        device.attributes['vfio-nic.inerplat.github.io'].linkType == 'infiniband' &&
+        device.driver == 'fabric-nic.inerplat.github.io' &&
+        device.attributes['fabric-nic.inerplat.github.io'].function == 'pf' &&
+        device.attributes['fabric-nic.inerplat.github.io'].linkType == 'infiniband' &&
         'fabric' in device.attributes['example.com'] &&
         device.attributes['example.com'].fabric == 'compute'
 ---
@@ -31,20 +31,20 @@ spec:
 apiVersion: resource.k8s.io/v1
 kind: DeviceClass
 metadata:
-  name: ib-pf-compute-guest.vfio-nic.inerplat.github.io
+  name: ib-pf-compute-guest.fabric-nic.inerplat.github.io
 spec:
   selectors:
   - cel:
       expression: >-
-        device.driver == 'vfio-nic.inerplat.github.io' &&
-        device.attributes['vfio-nic.inerplat.github.io'].function == 'pf' &&
-        device.attributes['vfio-nic.inerplat.github.io'].linkType == 'infiniband' &&
+        device.driver == 'fabric-nic.inerplat.github.io' &&
+        device.attributes['fabric-nic.inerplat.github.io'].function == 'pf' &&
+        device.attributes['fabric-nic.inerplat.github.io'].linkType == 'infiniband' &&
         'fabric' in device.attributes['example.com'] &&
         device.attributes['example.com'].fabric == 'compute'
   config:
   - opaque:
-      driver: vfio-nic.inerplat.github.io
+      driver: fabric-nic.inerplat.github.io
       parameters:
-        apiVersion: vfio-nic.inerplat.github.io/v1alpha1
+        apiVersion: fabric-nic.inerplat.github.io/v1alpha1
         kind: NicConfig
         guestRDMA: true

@@ -15,9 +15,9 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
 
-	"github.com/inerplat/dra-driver-vfio-nic/pkg/cdi"
-	"github.com/inerplat/dra-driver-vfio-nic/pkg/inventory"
-	"github.com/inerplat/dra-driver-vfio-nic/pkg/sysfs"
+	"github.com/inerplat/dra-driver-fabric-nic/pkg/cdi"
+	"github.com/inerplat/dra-driver-fabric-nic/pkg/inventory"
+	"github.com/inerplat/dra-driver-fabric-nic/pkg/sysfs"
 )
 
 // ConfigKind is the kind of the opaque config a class or claim can pass.
