@@ -1,0 +1,100 @@
+# fabric-nic-prep runs only on nodes labelled
+# fabric-nic.inerplat.github.io/prep=report or =bind.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fabric-nic-prep
+  namespace: fabric-nic
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: fabric-nic-prep
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - get
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: fabric-nic-prep
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: fabric-nic-prep
+subjects:
+- kind: ServiceAccount
+  name: fabric-nic-prep
+  namespace: fabric-nic
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: fabric-nic-prep
+  namespace: fabric-nic
+spec:
+  selector:
+    matchLabels:
+      app: fabric-nic-prep
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: fabric-nic-prep
+    spec:
+      serviceAccountName: fabric-nic-prep
+      priorityClassName: system-node-critical
+      # The host network and PID namespaces let prep see the netdevs,
+      # addresses and processes it checks before binding a port.
+      hostNetwork: true
+      hostPID: true
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: fabric-nic.inerplat.github.io/prep
+                operator: In
+                values:
+                - report
+                - bind
+      tolerations:
+      - operator: Exists
+      containers:
+      - name: prep
+        image: fabric-nic-prep:dev
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        securityContext:
+          privileged: true
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            memory: 128Mi
+        volumeMounts:
+        - name: state
+          mountPath: /var/lib/fabric-nic
+      volumes:
+      - name: state
+        hostPath:
+          path: /var/lib/fabric-nic
+          type: DirectoryOrCreate

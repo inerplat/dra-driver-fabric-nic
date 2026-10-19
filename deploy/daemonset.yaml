@@ -23,7 +23,7 @@ spec:
       - name: plugin
         image: fabric-nic-plugin:dev
         args:
-        - --attributes-file=/var/lib/fabric-nic/attributes.json
+        - --attributes-file=/var/lib/fabric-nic/attributes.json,/var/lib/fabric-nic/attributes.generated.json
         env:
         - name: NODE_NAME
           valueFrom:
