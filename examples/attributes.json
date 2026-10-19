@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "bootID": "0f3c6a9e-5d21-4b8e-9a77-2c1d4e8b6f10",
+  "devices": {
+    "0000:9c:00.0": {
+      "example.com/fabric": {
+        "string": "compute"
+      }
+    },
+    "0000:9d:00.1": {
+      "example.com/fabric": {
+        "string": "storage"
+      }
+    }
+  }
+}

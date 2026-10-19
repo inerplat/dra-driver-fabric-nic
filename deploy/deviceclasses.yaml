@@ -1,0 +1,26 @@
+# Every function the driver publishes.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: vfio-nic.inerplat.github.io
+spec:
+  selectors:
+  - cel:
+      expression: device.driver == 'vfio-nic.inerplat.github.io'
+---
+# Whole InfiniBand PFs that the attribute file names as compute fabric. A
+# function without the attribute never matches, so a node whose attribute
+# file is missing or stale hands out none.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: ib-pf-compute.vfio-nic.inerplat.github.io
+spec:
+  selectors:
+  - cel:
+      expression: >-
+        device.driver == 'vfio-nic.inerplat.github.io' &&
+        device.attributes['vfio-nic.inerplat.github.io'].function == 'pf' &&
+        device.attributes['vfio-nic.inerplat.github.io'].linkType == 'infiniband' &&
+        'fabric' in device.attributes['example.com'] &&
+        device.attributes['example.com'].fabric == 'compute'

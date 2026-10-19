@@ -1,0 +1,85 @@
+# Four GPUs of one NVSwitch partition from the NVIDIA DRA driver, each with
+# the compute PF under the same PCIe root.
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: gpu4-nic4
+spec:
+  spec:
+    devices:
+      requests:
+      - name: gpu0
+        exactly:
+          deviceClassName: vfio.gpu.nvidia.com
+          allocationMode: ExactCount
+          count: 1
+      - name: gpu1
+        exactly:
+          deviceClassName: vfio.gpu.nvidia.com
+          allocationMode: ExactCount
+          count: 1
+      - name: gpu2
+        exactly:
+          deviceClassName: vfio.gpu.nvidia.com
+          allocationMode: ExactCount
+          count: 1
+      - name: gpu3
+        exactly:
+          deviceClassName: vfio.gpu.nvidia.com
+          allocationMode: ExactCount
+          count: 1
+      - name: nic0
+        exactly:
+          deviceClassName: ib-pf-compute.vfio-nic.inerplat.github.io
+          allocationMode: ExactCount
+          count: 1
+      - name: nic1
+        exactly:
+          deviceClassName: ib-pf-compute.vfio-nic.inerplat.github.io
+          allocationMode: ExactCount
+          count: 1
+      - name: nic2
+        exactly:
+          deviceClassName: ib-pf-compute.vfio-nic.inerplat.github.io
+          allocationMode: ExactCount
+          count: 1
+      - name: nic3
+        exactly:
+          deviceClassName: ib-pf-compute.vfio-nic.inerplat.github.io
+          allocationMode: ExactCount
+          count: 1
+      constraints:
+      - matchAttribute: gpu.nvidia.com/partition4
+        requests:
+        - gpu0
+        - gpu1
+        - gpu2
+        - gpu3
+      - matchAttribute: resource.kubernetes.io/pcieRoot
+        requests:
+        - gpu0
+        - nic0
+      - matchAttribute: resource.kubernetes.io/pcieRoot
+        requests:
+        - gpu1
+        - nic1
+      - matchAttribute: resource.kubernetes.io/pcieRoot
+        requests:
+        - gpu2
+        - nic2
+      - matchAttribute: resource.kubernetes.io/pcieRoot
+        requests:
+        - gpu3
+        - nic3
+      config:
+      - requests:
+        - nic0
+        - nic1
+        - nic2
+        - nic3
+        opaque:
+          driver: vfio-nic.inerplat.github.io
+          parameters:
+            apiVersion: vfio-nic.inerplat.github.io/v1alpha1
+            kind: NicConfig
+            vfioBackend: legacy
