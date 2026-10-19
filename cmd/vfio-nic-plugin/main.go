@@ -98,12 +98,16 @@ func run(ctx context.Context, o options) error {
 	}
 	p.SetDevices(snap.devices)
 
+	dataDir := filepath.Join(o.pluginsDir, o.driverName)
+	if err := os.MkdirAll(dataDir, 0o750); err != nil {
+		return fmt.Errorf("create %s: %w", dataDir, err)
+	}
 	helper, err := kubeletplugin.Start(ctx, p,
 		kubeletplugin.DriverName(o.driverName),
 		kubeletplugin.NodeName(o.nodeName),
 		kubeletplugin.KubeClient(client),
 		kubeletplugin.RegistrarDirectoryPath(o.registrarDir),
-		kubeletplugin.PluginDataDirectoryPath(filepath.Join(o.pluginsDir, o.driverName)),
+		kubeletplugin.PluginDataDirectoryPath(dataDir),
 		kubeletplugin.EnableDeviceMetadata(true),
 		kubeletplugin.CDIDirectory(o.cdiDir),
 		kubeletplugin.MetadataVersions(metadatav1alpha1.SchemeGroupVersion),
