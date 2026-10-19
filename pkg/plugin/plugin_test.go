@@ -40,7 +40,12 @@ func newPlugin(t *testing.T) *Plugin {
 }
 
 func opaque(backend string, source resourceapi.AllocationConfigSource, requests ...string) resourceapi.DeviceAllocationConfiguration {
-	raw, _ := json.Marshal(NicConfig{APIVersion: driver + "/v1alpha1", Kind: ConfigKind, VfioBackend: backend})
+	return opaqueConfig(NicConfig{VfioBackend: backend}, source, requests...)
+}
+
+func opaqueConfig(cfg NicConfig, source resourceapi.AllocationConfigSource, requests ...string) resourceapi.DeviceAllocationConfiguration {
+	cfg.APIVersion, cfg.Kind = driver+"/v1alpha1", ConfigKind
+	raw, _ := json.Marshal(cfg)
 	return resourceapi.DeviceAllocationConfiguration{
 		Source:   source,
 		Requests: requests,
@@ -135,6 +140,16 @@ func TestCDISpecHasOneBackendPerDevice(t *testing.T) {
 	}
 	nodes := map[string][]string{}
 	for _, d := range spec.Devices {
+		if d.Name == cdi.GuestRDMADevice {
+			if len(d.ContainerEdits.DeviceNodes) != 32 {
+				t.Errorf("guest RDMA device has %d nodes", len(d.ContainerEdits.DeviceNodes))
+			}
+			last := d.ContainerEdits.DeviceNodes[31]
+			if last.Path != "/dev/infiniband/uverbs31" || last.Major != 231 || last.Minor != 223 || last.HostPath != "" {
+				t.Errorf("last guest node %+v", last)
+			}
+			continue
+		}
 		for _, n := range d.ContainerEdits.DeviceNodes {
 			nodes[d.Name] = append(nodes[d.Name], n.Path)
 		}
@@ -150,6 +165,67 @@ func TestCDISpecHasOneBackendPerDevice(t *testing.T) {
 	for name, paths := range want {
 		if got := strings.Join(nodes[name], ","); got != paths {
 			t.Errorf("%s: %s, want %s", name, got, paths)
+		}
+	}
+}
+
+func TestPrepareGuestRDMA(t *testing.T) {
+	p := newPlugin(t)
+	guest := driver + "/nic=" + cdi.GuestRDMADevice
+
+	ids, err := prepare(t, p, claim(opaqueConfig(NicConfig{GuestRDMA: true}, resourceapi.AllocationConfigSourceClass)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, id := range ids {
+		if id == guest {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("guest RDMA device listed %d times: %v", n, ids)
+	}
+
+	// Without the class setting the claim gets no guest nodes.
+	ids, _ = prepare(t, p, claim())
+	for _, id := range ids {
+		if id == guest {
+			t.Errorf("guest RDMA device without the class setting")
+		}
+	}
+
+	// A claim cannot turn it on.
+	if _, err := prepare(t, p, claim(opaqueConfig(NicConfig{GuestRDMA: true}, resourceapi.AllocationConfigSourceClaim))); err == nil {
+		t.Errorf("guestRDMA from a claim accepted")
+	}
+
+	// A claim config that changes only the backend keeps the class setting.
+	ids, err = prepare(t, p, claim(
+		opaqueConfig(NicConfig{GuestRDMA: true}, resourceapi.AllocationConfigSourceClass),
+		opaque(cdi.BackendIommufd, resourceapi.AllocationConfigSourceClaim, "nic0"),
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids[0] != driver+"/nic=0000-9c-00-0-iommufd" || ids[1] != guest {
+		t.Errorf("backend override with guest RDMA: %v", ids)
+	}
+}
+
+func TestPrepareGuestRDMASkipsEthernet(t *testing.T) {
+	p := newPlugin(t)
+	p.SetDevices(inventory.Build([]sysfs.Function{
+		{BDF: "0000:9c:00.0", Class: 0x020000, IOMMUGroup: "60"},
+		{BDF: "0000:bc:00.0", Class: 0x020000, IOMMUGroup: "70"},
+	}, nil, deviceattribute.WithFSFromRoot(t.TempDir())))
+	ids, err := prepare(t, p, claim(opaqueConfig(NicConfig{GuestRDMA: true}, resourceapi.AllocationConfigSourceClass)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range ids {
+		if id == driver+"/nic="+cdi.GuestRDMADevice {
+			t.Errorf("guest RDMA device for Ethernet functions: %v", ids)
 		}
 	}
 }

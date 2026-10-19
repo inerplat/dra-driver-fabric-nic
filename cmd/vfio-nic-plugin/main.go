@@ -1,5 +1,5 @@
 // Command vfio-nic-plugin publishes the network functions a node has bound to
-// vfio-pci as DRA devices, for VM runtimes such as KubeVirt and Kata.
+// vfio-pci as DRA devices, for runtimes that pass them to a VM.
 package main
 
 import (

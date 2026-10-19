@@ -1,6 +1,6 @@
 # dra-driver-vfio-nic
 
-A DRA driver that publishes the network functions a node has bound to vfio-pci, for VM runtimes such as KubeVirt and Kata. It only publishes and names devices: it does not create VFs, bind drivers or decide what a function is for.
+A DRA driver that publishes the network functions a node has bound to vfio-pci, for runtimes that pass them to a VM. It only publishes and names devices: it does not create VFs, bind drivers or decide what a function is for.
 
 Pair a NIC with a GPU from another driver, such as the NVIDIA GPU DRA driver, by matching a standard attribute in the claim (`examples/claim-gpu4-nic4.yaml`).
 
@@ -49,7 +49,7 @@ The CDI spec (`/var/run/cdi/vfio-nic.inerplat.github.io_nic.json`) lists each de
 | `<name>-legacy` | `/dev/vfio/<group>`, `/dev/vfio/vfio` |
 | `<name>-iommufd` | `/dev/vfio/devices/vfioN`, `/dev/iommu` (only with a VFIO cdev) |
 
-A VM runtime attaches one device per node it is given, so a claim gets exactly one backend: `--vfio-backend` (default `legacy`), overridden by a `NicConfig` in the class or claim:
+A VM runtime attaches one device per node it is given, so a claim gets exactly one backend: `--vfio-backend` (default `legacy`), overridden by a `NicConfig` in the class or claim. A claim config overrides a class config, and a config naming requests overrides one that names none:
 
 ```yaml
 config:
@@ -62,6 +62,14 @@ config:
       kind: NicConfig
       vfioBackend: iommufd
 ```
+
+## RDMA verbs nodes in a VM guest
+
+A runtime that runs the container in a VM creates the container's device nodes inside the guest from the OCI spec. An InfiniBand function passed through to such a guest gets its verbs node, `/dev/infiniband/uverbsN`, from the guest kernel, and the container needs that node to use RDMA.
+
+With `guestRDMA: true` in a `NicConfig`, a claim with at least one InfiniBand function also gets the CDI device `guest-rdma`. It lists `/dev/infiniband/uverbs0` to `uverbs31` with the char numbers ib_uverbs gives its first 32 devices (major 231, minors 192 to 223) and no host path. The guest numbers its devices in its own probe order, which the driver cannot see, so the device lists all of them; verbs libraries open only the nodes that sysfs names.
+
+On a container that shares the host kernel the same numbers are the host's RDMA devices, so only a DeviceClass may set `guestRDMA`; a claim that sets it fails to prepare. `deploy/deviceclasses.yaml` has an example class.
 
 Prepare writes no files of its own. It returns the CDI device and KEP-5304 device metadata with `resource.kubernetes.io/pciBusID`, which KubeVirt reads to assign the device. Unprepare has nothing to undo.
 

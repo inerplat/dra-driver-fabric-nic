@@ -24,3 +24,27 @@ spec:
         device.attributes['vfio-nic.inerplat.github.io'].linkType == 'infiniband' &&
         'fabric' in device.attributes['example.com'] &&
         device.attributes['example.com'].fabric == 'compute'
+---
+# The same PFs for a runtime that runs the container in a VM and creates its
+# device nodes inside the guest: the claim also gets the guest's RDMA verbs
+# nodes. Do not use this class with containers that share the host kernel.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: ib-pf-compute-guest.vfio-nic.inerplat.github.io
+spec:
+  selectors:
+  - cel:
+      expression: >-
+        device.driver == 'vfio-nic.inerplat.github.io' &&
+        device.attributes['vfio-nic.inerplat.github.io'].function == 'pf' &&
+        device.attributes['vfio-nic.inerplat.github.io'].linkType == 'infiniband' &&
+        'fabric' in device.attributes['example.com'] &&
+        device.attributes['example.com'].fabric == 'compute'
+  config:
+  - opaque:
+      driver: vfio-nic.inerplat.github.io
+      parameters:
+        apiVersion: vfio-nic.inerplat.github.io/v1alpha1
+        kind: NicConfig
+        guestRDMA: true

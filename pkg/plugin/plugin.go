@@ -17,6 +17,7 @@ import (
 
 	"github.com/inerplat/dra-driver-vfio-nic/pkg/cdi"
 	"github.com/inerplat/dra-driver-vfio-nic/pkg/inventory"
+	"github.com/inerplat/dra-driver-vfio-nic/pkg/sysfs"
 )
 
 // ConfigKind is the kind of the opaque config a class or claim can pass.
@@ -28,6 +29,17 @@ type NicConfig struct {
 	Kind       string `json:"kind"`
 	// VfioBackend is "legacy" or "iommufd"; empty keeps the driver default.
 	VfioBackend string `json:"vfioBackend,omitempty"`
+	// GuestRDMA adds the RDMA verbs nodes of a VM guest to a claim with an
+	// InfiniBand function, for runtimes that create the container's device
+	// nodes inside the guest. Only a DeviceClass may set it: on a container
+	// sharing the host kernel the same nodes are the host's RDMA devices.
+	GuestRDMA bool `json:"guestRDMA,omitempty"`
+}
+
+// requestConfig is the configuration resolved for one request.
+type requestConfig struct {
+	backend   string
+	guestRDMA bool
 }
 
 // Plugin prepares claims from the current inventory. Preparing writes
@@ -70,7 +82,7 @@ func (p *Plugin) prepare(claim *resourceapi.ResourceClaim) ([]kubeletplugin.Devi
 	if claim.Status.Allocation == nil {
 		return nil, fmt.Errorf("claim %s/%s is not allocated", claim.Namespace, claim.Name)
 	}
-	backends, err := p.backendsByRequest(claim.Status.Allocation.Devices.Config)
+	configs, err := p.resolveConfigs(claim.Status.Allocation.Devices.Config)
 	if err != nil {
 		return nil, err
 	}
@@ -78,6 +90,7 @@ func (p *Plugin) prepare(claim *resourceapi.ResourceClaim) ([]kubeletplugin.Devi
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	var prepared []kubeletplugin.Device
+	guestRDMAAdded := false
 	for _, r := range claim.Status.Allocation.Devices.Results {
 		if r.Driver != p.DriverName {
 			continue
@@ -86,37 +99,51 @@ func (p *Plugin) prepare(claim *resourceapi.ResourceClaim) ([]kubeletplugin.Devi
 		if !ok {
 			return nil, fmt.Errorf("device %s is no longer on this node", r.Device)
 		}
-		backend := p.DefaultBackend
-		if b, ok := backends[r.Request]; ok {
-			backend = b
-		} else if b, ok := backends[""]; ok {
-			backend = b
+		cfg := requestConfig{backend: p.DefaultBackend}
+		if c, ok := configs[""]; ok {
+			cfg = merge(cfg, c)
 		}
-		if backend == cdi.BackendIommufd && d.Function.Cdev == "" {
+		if c, ok := configs[r.Request]; ok {
+			cfg = merge(cfg, c)
+		}
+		if cfg.backend == cdi.BackendIommufd && d.Function.Cdev == "" {
 			return nil, fmt.Errorf("device %s has no VFIO cdev for the iommufd backend", r.Device)
+		}
+		ids := []string{p.CDI.DeviceID(d.Name, cfg.backend)}
+		if cfg.guestRDMA && !guestRDMAAdded && d.Function.LinkType() == sysfs.LinkInfiniband {
+			ids = append(ids, p.CDI.GuestRDMAID())
+			guestRDMAAdded = true
 		}
 		prepared = append(prepared, kubeletplugin.Device{
 			Requests:     []string{r.Request},
 			PoolName:     r.Pool,
 			DeviceName:   r.Device,
-			CDIDeviceIDs: []string{p.CDI.DeviceID(d.Name, backend)},
+			CDIDeviceIDs: ids,
 			Metadata:     &kubeletplugin.DeviceMetadata{Attributes: metadataAttributes(d)},
 		})
 	}
 	return prepared, nil
 }
 
-// backendsByRequest resolves the backend per request name, "" standing for
-// configs that name no request. Class configs come first, so a claim config
-// overrides them, and a later config overrides an earlier one.
-func (p *Plugin) backendsByRequest(configs []resourceapi.DeviceAllocationConfiguration) (map[string]string, error) {
+func merge(base, over requestConfig) requestConfig {
+	if over.backend != "" {
+		base.backend = over.backend
+	}
+	base.guestRDMA = base.guestRDMA || over.guestRDMA
+	return base
+}
+
+// resolveConfigs resolves the configuration per request name, "" standing
+// for configs that name no request. Class configs come first, so a claim
+// config overrides them, and a later config overrides an earlier one.
+func (p *Plugin) resolveConfigs(configs []resourceapi.DeviceAllocationConfiguration) (map[string]requestConfig, error) {
 	ordered := make([]resourceapi.DeviceAllocationConfiguration, len(configs))
 	copy(ordered, configs)
 	sort.SliceStable(ordered, func(i, j int) bool {
 		return ordered[i].Source == resourceapi.AllocationConfigSourceClass && ordered[j].Source != resourceapi.AllocationConfigSourceClass
 	})
 
-	out := map[string]string{}
+	out := map[string]requestConfig{}
 	for _, c := range ordered {
 		if c.Opaque == nil || c.Opaque.Driver != p.DriverName {
 			continue
@@ -129,18 +156,20 @@ func (p *Plugin) backendsByRequest(configs []resourceapi.DeviceAllocationConfigu
 			return nil, fmt.Errorf("unsupported config %s %s, want %s %s", cfg.APIVersion, cfg.Kind, p.ConfigVersion, ConfigKind)
 		}
 		switch cfg.VfioBackend {
-		case "":
-			continue
-		case cdi.BackendLegacy, cdi.BackendIommufd:
+		case "", cdi.BackendLegacy, cdi.BackendIommufd:
 		default:
 			return nil, fmt.Errorf("unknown vfioBackend %q", cfg.VfioBackend)
 		}
-		if len(c.Requests) == 0 {
-			out[""] = cfg.VfioBackend
-			continue
+		if cfg.GuestRDMA && c.Source != resourceapi.AllocationConfigSourceClass {
+			return nil, fmt.Errorf("guestRDMA can only be set by a DeviceClass")
 		}
-		for _, req := range c.Requests {
-			out[req] = cfg.VfioBackend
+		rc := requestConfig{backend: cfg.VfioBackend, guestRDMA: cfg.GuestRDMA}
+		requests := c.Requests
+		if len(requests) == 0 {
+			requests = []string{""}
+		}
+		for _, req := range requests {
+			out[req] = merge(out[req], rc)
 		}
 	}
 	return out, nil
